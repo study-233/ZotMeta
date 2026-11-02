@@ -1,11 +1,15 @@
 <vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
       xmlns:html="http://www.w3.org/1999/xhtml"
       id="zotmeta-preferences">
+    <linkset>
+        <html:link rel="localization" href="zotmeta.ftl"/>
+    </linkset>
     <html:style>
         #zotmeta-preferences {
             box-sizing: border-box;
-            color: #20242b;
-            font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: var(--zotmeta-fg);
+            font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+            background: transparent;
             padding: 8px 0 18px;
         }
 
@@ -30,7 +34,7 @@
         }
 
         .zotmeta-pref-subtitle {
-            color: #667085;
+            color: var(--zotmeta-muted);
             font-size: 12px;
             line-height: 1.4;
         }
@@ -42,8 +46,8 @@
         }
 
         .zotmeta-pref-section-card {
-            background: #fff;
-            border: 1px solid rgba(0, 0, 0, .08);
+            background: var(--zotmeta-panel);
+            border: 1px solid var(--zotmeta-panel-border);
             border-radius: 8px;
             display: grid;
             gap: 12px;
@@ -63,7 +67,7 @@
         }
 
         .zotmeta-pref-section-card-meta {
-            color: #667085;
+            color: var(--zotmeta-muted);
             font-size: 12px;
         }
 
@@ -83,10 +87,10 @@
 
         .zotmeta-pref-icon-button {
             align-items: center;
-            background: #fff;
-            border: 1px solid rgba(0, 0, 0, .12);
+            background: var(--zotmeta-bg);
+            border: 1px solid var(--zotmeta-border);
             border-radius: 7px;
-            color: #20242b;
+            color: var(--zotmeta-fg);
             cursor: pointer;
             display: inline-flex;
             font: inherit;
@@ -98,13 +102,13 @@
         }
 
         .zotmeta-pref-icon-button:disabled {
-            color: #a3aab5;
+            color: var(--zotmeta-muted);
             cursor: default;
             opacity: .55;
         }
 
         .zotmeta-pref-section-title {
-            color: #667085;
+            color: var(--zotmeta-muted);
             font-size: 12px;
             font-weight: 700;
             letter-spacing: .05em;
@@ -114,8 +118,8 @@
         .zotmeta-pref-setting,
         .zotmeta-pref-card,
         .zotmeta-pref-info {
-            background: #fff;
-            border: 1px solid rgba(0, 0, 0, .08);
+            background: var(--zotmeta-panel);
+            border: 1px solid var(--zotmeta-panel-border);
             border-radius: 8px;
             padding: 12px;
         }
@@ -136,7 +140,9 @@
         }
 
         .zotmeta-pref-number {
-            border: 1px solid rgba(0, 0, 0, .16);
+            color: var(--zotmeta-fg);
+            background: var(--zotmeta-control);
+            border: 1px solid var(--zotmeta-border);
             border-radius: 6px;
             font: inherit;
             padding: 6px 8px;
@@ -144,8 +150,8 @@
         }
 
         .zotmeta-pref-select {
-            background: #fff;
-            border: 1px solid rgba(0, 0, 0, .16);
+            background: var(--zotmeta-bg);
+            border: 1px solid var(--zotmeta-border);
             border-radius: 6px;
             color: inherit;
             flex: 1;
@@ -161,10 +167,10 @@
 
         .zotmeta-pref-button {
             align-items: center;
-            background: #2563eb;
+            background: var(--zotmeta-accent);
             border: 0;
             border-radius: 7px;
-            color: white;
+            color: var(--accent-white, #fff);
             cursor: pointer;
             display: inline-flex;
             font: inherit;
@@ -190,13 +196,13 @@
 
         .zotmeta-pref-card-label,
         .zotmeta-pref-info {
-            color: #667085;
+            color: var(--zotmeta-muted);
             font-size: 12px;
             line-height: 1.45;
         }
 
         .zotmeta-pref-link {
-            color: #2563eb;
+            color: var(--zotmeta-link);
             font-weight: 650;
             text-decoration: none;
         }
@@ -211,11 +217,11 @@
             display: grid;
             font-size: 12px;
             gap: 10px;
-            grid-template-columns: 150px 1fr 48px;
+            grid-template-columns: minmax(100px, 150px) minmax(40px, 1fr) max-content;
         }
 
         .zotmeta-pref-type-bar {
-            background: #e7eaf0;
+            background: var(--zotmeta-track);
             border-radius: 999px;
             height: 7px;
             overflow: hidden;
@@ -232,32 +238,33 @@
             gap: 2px;
             grid-auto-flow: column;
             grid-template-rows: repeat(7, var(--zotmeta-activity-cell, 8px));
+            grid-auto-columns: var(--zotmeta-activity-cell, 8px);
             max-width: 100%;
-            overflow: hidden;
+            overflow-x: auto;
             padding-bottom: 2px;
         }
 
         .zotmeta-pref-activity-cell {
-            background: #ebedf0;
+            background: var(--zotmeta-heat-0);
             border-radius: 2px;
             height: var(--zotmeta-activity-cell, 8px);
             width: var(--zotmeta-activity-cell, 8px);
         }
 
         .zotmeta-pref-activity-cell.level-1 {
-            background: #9be9a8;
+            background: var(--zotmeta-heat-1);
         }
 
         .zotmeta-pref-activity-cell.level-2 {
-            background: #40c463;
+            background: var(--zotmeta-heat-2);
         }
 
         .zotmeta-pref-activity-cell.level-3 {
-            background: #30a14e;
+            background: var(--zotmeta-heat-3);
         }
 
         .zotmeta-pref-activity-cell.level-4 {
-            background: #216e39;
+            background: var(--zotmeta-heat-4);
         }
 
         .zotmeta-pref-activity-cell.is-outside {
@@ -265,7 +272,7 @@
         }
 
         .zotmeta-pref-activity-cell.is-future {
-            background: #f2f4f7;
+            background: var(--zotmeta-heat-0);
             opacity: .55;
         }
     </html:style>
@@ -274,87 +281,88 @@
         <html:div class="zotmeta-pref-logo"></html:div>
         <html:div>
             <html:div class="zotmeta-pref-title">ZotMeta</html:div>
-            <html:div class="zotmeta-pref-subtitle">Metadata enrichment, PDF identifier extraction, and batch update monitoring.</html:div>
+            <html:div class="zotmeta-pref-subtitle" data-l10n-id="zotmeta-subtitle"></html:div>
         </html:div>
     </html:div>
 
     <html:div class="zotmeta-pref-section">
-        <html:div class="zotmeta-pref-section-title">Settings</html:div>
+        <html:div class="zotmeta-pref-section-title" data-l10n-id="zotmeta-settings"></html:div>
         <html:div class="zotmeta-pref-setting">
-            <html:label class="zotmeta-pref-setting-label" for="zotmeta-pref-journal-source">Journal lookup order</html:label>
+            <html:label class="zotmeta-pref-setting-label" for="zotmeta-pref-journal-source" data-l10n-id="zotmeta-journal-order"></html:label>
             <html:select id="zotmeta-pref-journal-source" class="zotmeta-pref-select" aria-describedby="zotmeta-pref-journal-help">
-                <html:option value="doi-pubmed">DOI first, PubMed fallback</html:option>
-                <html:option value="pubmed">PubMed first, DOI fallback</html:option>
-                <html:option value="doi">DOI only</html:option>
+                <html:option value="doi-pubmed" data-l10n-id="zotmeta-doi-first"></html:option>
+                <html:option value="pubmed" data-l10n-id="zotmeta-pubmed-first"></html:option>
+                <html:option value="doi" data-l10n-id="zotmeta-doi-only"></html:option>
             </html:select>
         </html:div>
-        <html:div id="zotmeta-pref-journal-help" class="zotmeta-pref-subtitle">Uses the first source with available metadata. Tries the fallback if the first source has no match or the request fails.</html:div>
+        <html:div id="zotmeta-pref-journal-help" class="zotmeta-pref-subtitle" data-l10n-id="zotmeta-journal-help"></html:div>
         <html:div class="zotmeta-pref-setting">
-            <html:div class="zotmeta-pref-setting-label">Concurrent update threads</html:div>
-            <html:input id="zotmeta-pref-concurrent-range" type="range" min="1" max="12"/>
-            <html:input id="zotmeta-pref-concurrent-number" class="zotmeta-pref-number" type="number" min="1" max="12"/>
+            <html:label class="zotmeta-pref-setting-label" for="zotmeta-pref-concurrent-range" data-l10n-id="zotmeta-threads"></html:label>
+            <html:input id="zotmeta-pref-concurrent-range" type="range" data-l10n-id="zotmeta-threads-input" min="1" max="12"/>
+            <html:input id="zotmeta-pref-concurrent-number" class="zotmeta-pref-number" type="number" data-l10n-id="zotmeta-threads-input" min="1" max="12"/>
         </html:div>
         <html:div class="zotmeta-pref-setting">
             <html:input id="zotmeta-pref-tag-failed" type="checkbox" aria-describedby="zotmeta-pref-tag-failed-help"/>
             <html:div>
-                <html:label for="zotmeta-pref-tag-failed">Tag failed updates</html:label>
-                <html:div id="zotmeta-pref-tag-failed-help" class="zotmeta-pref-subtitle">Add the tag “ZotMeta: Failed” to failed items so you can filter them later. Off by default.</html:div>
+                <html:label for="zotmeta-pref-tag-failed" data-l10n-id="zotmeta-tag-failed"></html:label>
+                <html:div id="zotmeta-pref-tag-failed-help" class="zotmeta-pref-subtitle" data-l10n-id="zotmeta-tag-help"></html:div>
             </html:div>
         </html:div>
         <html:div class="zotmeta-pref-actions">
-            <html:button id="zotmeta-pref-save" class="zotmeta-pref-button" type="button">Save settings</html:button>
+            <html:button id="zotmeta-pref-save" class="zotmeta-pref-button" type="button" data-l10n-id="zotmeta-save"></html:button>
         </html:div>
     </html:div>
 
     <html:div class="zotmeta-pref-section">
-        <html:div class="zotmeta-pref-section-title">Library Stats</html:div>
+        <html:div class="zotmeta-pref-section-title" data-l10n-id="zotmeta-library-stats"></html:div>
         <html:div class="zotmeta-pref-section-card">
             <html:div class="zotmeta-pref-section-card-head">
-                <html:div class="zotmeta-pref-section-card-title">Item Stats</html:div>
+                <html:div class="zotmeta-pref-section-card-title" data-l10n-id="zotmeta-item-stats"></html:div>
             </html:div>
             <html:div id="zotmeta-pref-stats-cards" class="zotmeta-pref-card-grid">
                 <html:div class="zotmeta-pref-card">
                     <html:div class="zotmeta-pref-card-value">...</html:div>
-                    <html:div class="zotmeta-pref-card-label">Total items</html:div>
+                    <html:div class="zotmeta-pref-card-label" data-l10n-id="zotmeta-total-items"></html:div>
                 </html:div>
                 <html:div class="zotmeta-pref-card">
                     <html:div class="zotmeta-pref-card-value">...</html:div>
-                    <html:div class="zotmeta-pref-card-label">Attachments</html:div>
+                    <html:div class="zotmeta-pref-card-label" data-l10n-id="zotmeta-attachments"></html:div>
                 </html:div>
                 <html:div class="zotmeta-pref-card">
                     <html:div class="zotmeta-pref-card-value">...</html:div>
-                    <html:div class="zotmeta-pref-card-label">Failed</html:div>
+                    <html:div class="zotmeta-pref-card-label" data-l10n-id="zotmeta-failed"></html:div>
                 </html:div>
                 <html:div class="zotmeta-pref-card">
                     <html:div class="zotmeta-pref-card-value">...</html:div>
-                    <html:div class="zotmeta-pref-card-label">Skipped</html:div>
+                    <html:div class="zotmeta-pref-card-label" data-l10n-id="zotmeta-skipped"></html:div>
                 </html:div>
             </html:div>
             <html:div id="zotmeta-pref-type-list" class="zotmeta-pref-type-list">
-                <html:div class="zotmeta-pref-info">Loading library stats...</html:div>
+                <html:div class="zotmeta-pref-info" data-l10n-id="zotmeta-loading-stats"></html:div>
             </html:div>
         </html:div>
         <html:div class="zotmeta-pref-section-card">
             <html:div class="zotmeta-pref-section-card-head">
                 <html:div>
-                    <html:div class="zotmeta-pref-section-card-title">Added Items Activity</html:div>
-                    <html:div id="zotmeta-pref-activity-summary" class="zotmeta-pref-section-card-meta">Loading activity...</html:div>
+                    <html:div class="zotmeta-pref-section-card-title" data-l10n-id="zotmeta-activity"></html:div>
+                    <html:div id="zotmeta-pref-activity-summary" class="zotmeta-pref-section-card-meta" aria-live="polite"></html:div>
                 </html:div>
                 <html:div class="zotmeta-pref-activity-control">
-                    <html:button id="zotmeta-pref-activity-previous" class="zotmeta-pref-icon-button" type="button" title="Previous year">&#8249;</html:button>
+                    <html:button id="zotmeta-pref-activity-previous" class="zotmeta-pref-icon-button" type="button" data-l10n-id="zotmeta-previous-year">&#8249;</html:button>
                     <html:div id="zotmeta-pref-activity-year" class="zotmeta-pref-activity-year">...</html:div>
-                    <html:button id="zotmeta-pref-activity-next" class="zotmeta-pref-icon-button" type="button" title="Next year">&#8250;</html:button>
+                    <html:button id="zotmeta-pref-activity-next" class="zotmeta-pref-icon-button" type="button" data-l10n-id="zotmeta-next-year">&#8250;</html:button>
                 </html:div>
             </html:div>
             <html:div id="zotmeta-pref-activity-grid" class="zotmeta-pref-activity-grid"></html:div>
+            <html:div id="zotmeta-pref-activity-legend" class="zotmeta-pref-activity-legend"></html:div>
         </html:div>
     </html:div>
 
     <html:div class="zotmeta-pref-section">
-        <html:div class="zotmeta-pref-section-title">Project</html:div>
+        <html:div class="zotmeta-pref-section-title" data-l10n-id="zotmeta-project"></html:div>
         <html:div id="zotmeta-pref-project" class="zotmeta-pref-info">
             <html:a class="zotmeta-pref-link" href="https://github.com/RoadToDream/ZotMeta">RoadToDream/ZotMeta</html:a>
-            <html:span> - Star ZotMeta if it helps.</html:span>
+            <html:span data-l10n-id="zotmeta-project-note"></html:span>
         </html:div>
     </html:div>
 </vbox>

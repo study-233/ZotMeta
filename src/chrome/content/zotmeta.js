@@ -1,3 +1,14 @@
+class MetadataFailures extends Set {
+    retryable = false;
+    rateLimitUntil = Infinity;
+
+    add(message, retryable = true, rateLimitUntil = Infinity) {
+        this.retryable ||= retryable;
+        this.rateLimitUntil = Math.min(this.rateLimitUntil, rateLimitUntil);
+        return super.add(message);
+    }
+}
+
 ZotMeta = {
     id: null,
     version: null,
@@ -31,12 +42,13 @@ ZotMeta = {
 
         // Explicit XUL namespace keeps menu insertion stable in Zotero 7+ chrome windows.
         let XUL_NS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
+        window.MozXULElement.insertFTLIfNeeded("zotmeta.ftl");
 
         // Add menu option
         let menuitem = doc.createElementNS(XUL_NS, 'menuitem');
         menuitem.id = 'update-metadata';
         menuitem.setAttribute('type', 'button');
-        menuitem.setAttribute('data-l10n-id', 'update-metadata');
+        menuitem.setAttribute('label', ZotMetaL10n.t('update-metadata.label'));
         menuitem.addEventListener('command', () => {
             this.updateSelectedItemsMetadata();
         });
@@ -46,7 +58,7 @@ ZotMeta = {
         let createParentMenuitem = doc.createElementNS(XUL_NS, 'menuitem');
         createParentMenuitem.id = 'zotmeta-create-parent-item';
         createParentMenuitem.setAttribute('type', 'button');
-        createParentMenuitem.setAttribute('label', 'Create Parent Item');
+        createParentMenuitem.setAttribute('label', ZotMetaL10n.t('create-parent.label'));
         createParentMenuitem.addEventListener('command', () => {
             this.createParentItemsForSelectedAttachments();
         });
@@ -55,7 +67,6 @@ ZotMeta = {
 
         this.addToolsMenuItem(window, XUL_NS);
 
-        window.MozXULElement.insertFTLIfNeeded("zotmeta.ftl");
     },
 
     addToolsMenuItem(window, XUL_NS) {
@@ -79,7 +90,7 @@ ZotMeta = {
         let menuitem = doc.createElementNS(XUL_NS, 'menuitem');
         menuitem.id = 'zotmeta-tools-menuitem';
         menuitem.setAttribute('type', 'button');
-        menuitem.setAttribute('label', 'ZotMeta Control Panel');
+        menuitem.setAttribute('label', ZotMetaL10n.t('control-panel.label'));
         menuitem.addEventListener('command', () => {
             this.showControlPanel(window);
         });
@@ -205,8 +216,8 @@ ZotMeta = {
         if (!this.updateProgressHandle) {
             this.updateProgressHandle = Utilities.initializeModernProgress(
                 window,
-                "Updating metadata",
-                "Preparing metadata updates..."
+                ZotMetaL10n.t('updating'),
+                ZotMetaL10n.t('preparing-updates')
             );
             this.updateTotals = this.createUpdateTotals();
         }
@@ -216,7 +227,8 @@ ZotMeta = {
         this.ensureUpdateProgress(window);
         this.updateBatchCounter++;
         var batch = {
-            name: "Batch " + this.updateBatchCounter,
+            id: this.updateBatchCounter,
+            name: ZotMetaL10n.t('batch-name', { number: ZotMetaL10n.number(this.updateBatchCounter) }),
             total: items.length,
             completed: 0,
             success: 0,
@@ -227,7 +239,7 @@ ZotMeta = {
         };
         batch.progressItem = Utilities.addProgressItem(
             this.updateProgressHandle,
-            batch.name + ": queued " + Utilities.pluralize(batch.total, "item")
+            ZotMetaL10n.t('queued-items', { batch: batch.name, items: Utilities.itemCount(batch.total) })
         );
 
         this.updateTotals.total += items.length;
@@ -259,7 +271,7 @@ ZotMeta = {
                 this.updateTotals.failed,
                 this.updateTotals.skipped
             ),
-            "Updating metadata"
+            ZotMetaL10n.t('updating')
         );
     },
 
@@ -298,28 +310,46 @@ ZotMeta = {
     async processUpdateTask(task) {
         var item = task.item;
         var batch = task.batch;
+        var title = Utilities.getItemDisplayTitle(item);
+        var status = 1;
         try {
             await this.prepareItemForMetadataUpdate(item);
             var updater = this.getMetadataUpdater(item);
-            if (!updater) {
-                await this.recordUpdateResult(batch, item, 2);
-                return;
-            }
-            var status = await this.updateItemWithRetry(updater, item);
-            await this.recordUpdateResult(batch, item, status);
+            status = updater ? await this.updateItemWithRetry(updater, item, title, batch) : 2;
         } catch (error) {
-            this.log("Failed to update item metadata: " + error);
-            await this.recordUpdateResult(batch, item, 1);
+            this.logItemFailure(item, title, error, batch.id);
         }
+        await this.recordUpdateResult(batch, item, status);
     },
 
-    async updateItemWithRetry(updater, item) {
-        var status = await updater.updateMetadata(item);
-        if (status === 0) {
-            return status;
+    logItemFailure(item, title, reason, batchID) {
+        this.log('Failed to update item metadata: ' + JSON.stringify({ batchID, itemID: item.id, title, reason: String(reason) }));
+    },
+
+    async updateItemWithRetry(updater, item, title = Utilities.getItemDisplayTitle(item), batch = {}) {
+        var reasons = new MetadataFailures();
+        var status = await updater.updateMetadata(item, reasons);
+        if (status === 1) {
+            var now = Date.now();
+            var retryAt = !reasons.size || reasons.retryable ? now + 500 : Infinity;
+            if (Number.isFinite(reasons.rateLimitUntil)) {
+                batch.cooldownDeadline ??= now + 10000;
+                if (Math.max(now, reasons.rateLimitUntil) <= batch.cooldownDeadline) {
+                    retryAt = Math.min(retryAt, reasons.rateLimitUntil);
+                }
+            }
+            if (Number.isFinite(retryAt)) {
+                await Utilities.delay(Math.max(0, retryAt - now));
+                reasons = new MetadataFailures();
+                status = await updater.updateMetadata(item, reasons);
+            }
         }
-        await Utilities.delay(500);
-        return updater.updateMetadata(item);
+        if (status === 1) {
+            this.logItemFailure(item, title, [...reasons].join(' | ') || 'Updater returned failure without a diagnostic', batch.id);
+        } else if (status === 0 && updater === Arxiv) {
+            this.log('Preprint saved: ' + JSON.stringify({ batchID: batch.id, itemID: item.id }));
+        }
+        return status;
     },
 
     async recordUpdateResult(batch, item, status) {
@@ -347,6 +377,11 @@ ZotMeta = {
         }
 
         this.refreshUpdateBatch(batch, batch.completed === batch.total);
+        if (batch.completed === batch.total) {
+            this.log('Batch completed: ' + JSON.stringify({
+                batchID: batch.id, total: batch.total, updated: batch.success, failed: batch.failed, skipped: batch.skipped
+            }));
+        }
         this.refreshUpdateProgress();
     },
 
@@ -372,7 +407,7 @@ ZotMeta = {
             if (this.updateProgressHandle) {
                 this.refreshUpdateProgress();
             } else {
-                Utilities.publishSuccess("No metadata updated", "Select one or more supported items first.");
+                Utilities.publishSuccess(ZotMetaL10n.t('none-updated'), ZotMetaL10n.t('select-items'));
             }
             return;
         }
@@ -391,12 +426,7 @@ ZotMeta = {
     },
 
     getItemTypeLabel(item) {
-        try {
-            if (Zotero.ItemTypes && typeof Zotero.ItemTypes.getName === 'function') {
-                return Zotero.ItemTypes.getName(item.itemTypeID);
-            }
-        } catch (error) {}
-        return String(item.itemTypeID || "unknown");
+        return ZotMetaL10n.itemType(item.itemTypeID);
     },
 
     getLibraryStats() {
@@ -446,7 +476,7 @@ ZotMeta = {
     openPreferencesPane() {
         var internalUtilities = Zotero.Utilities && Zotero.Utilities.Internal;
         if (!internalUtilities || typeof internalUtilities.openPreferences !== 'function') {
-            Utilities.publishError("ZotMeta settings unavailable", "Zotero preferences could not be opened.");
+            Utilities.publishError(ZotMetaL10n.t('settings-unavailable'), ZotMetaL10n.t('settings-open-error'));
             return;
         }
 
@@ -454,18 +484,19 @@ ZotMeta = {
             internalUtilities.openPreferences("zotmeta-prefpane");
         } catch (error) {
             this.log("Unable to open Zotero preferences: " + error);
-            Utilities.publishError("ZotMeta settings unavailable", "Zotero preferences could not be opened.");
+            Utilities.publishError(ZotMetaL10n.t('settings-unavailable'), ZotMetaL10n.t('settings-open-error'));
         }
     },
 
-    getAttachmentTitle(attachment) {
+    getAttachmentTitle(attachment, forDisplay = false) {
         if (attachment.getField && attachment.getField('title')) {
             return attachment.getField('title');
         }
         if (attachment.attachmentFilename) {
             return attachment.attachmentFilename.replace(/\.pdf$/i, "");
         }
-        return "Untitled attachment";
+        // The stored placeholder stays stable across languages; localize UI only.
+        return forDisplay ? ZotMetaL10n.t('untitled-attachment') : "Untitled attachment";
     },
 
     getParentItemType(identifiers) {
@@ -478,7 +509,7 @@ ZotMeta = {
         return 'document';
     },
 
-    async createParentItemForAttachment(attachment) {
+    async createParentItemForAttachment(attachment, batch = {}) {
         if (!Utilities.isPDFAttachment(attachment)) {
             return 2;
         }
@@ -498,7 +529,14 @@ ZotMeta = {
 
         var updater = this.getMetadataUpdater(parent);
         if (updater) {
-            var status = await this.updateItemWithRetry(updater, parent);
+            var title = Utilities.getItemDisplayTitle(parent);
+            var status;
+            try {
+                status = await this.updateItemWithRetry(updater, parent, title, batch);
+            } catch (error) {
+                this.logItemFailure(parent, title, error, batch.id);
+                return 1;
+            }
             await Utilities.markItemUpdateStatus(parent, status);
             return status;
         }
@@ -511,16 +549,17 @@ ZotMeta = {
         var window = this.getActiveWindow(pane);
         var attachments = selectedItems.filter(item => Utilities.isPDFAttachment(item));
         if (attachments.length === 0) {
-            Utilities.publishSuccess("No parent items created", "Select one or more PDF attachments first.");
+            Utilities.publishSuccess(ZotMetaL10n.t('none-created'), ZotMetaL10n.t('select-pdfs'));
             return;
         }
 
         var progressHandle = Utilities.initializeModernProgress(
             window,
-            "Creating parent items",
-            "Preparing " + Utilities.pluralize(attachments.length, "PDF attachment") + "..."
+            ZotMetaL10n.t('creating-parents'),
+            ZotMetaL10n.t('preparing-pdfs', { count: ZotMetaL10n.number(attachments.length) })
         );
 
+        var batch = { id: ++this.updateBatchCounter };
         var created = 0;
         var failed = 0;
         var skipped = 0;
@@ -528,11 +567,11 @@ ZotMeta = {
         for (let attachment of attachments) {
             var progressItem = Utilities.addProgressItem(
                 progressHandle,
-                this.getAttachmentTitle(attachment) + ": queued"
+                ZotMetaL10n.t('queued-title', { title: this.getAttachmentTitle(attachment, true) })
             );
             var status = 1;
             try {
-                status = await this.createParentItemForAttachment(attachment);
+                status = await this.createParentItemForAttachment(attachment, batch);
                 if (status === 2) {
                     skipped++;
                 } else if (status === 0) {
@@ -550,7 +589,9 @@ ZotMeta = {
             Utilities.updateProgressItem(
                 progressItem,
                 100,
-                this.getAttachmentTitle(attachment) + ": done",
+                ZotMetaL10n.t(status === 2 ? 'skipped-title' : status === 1 ? 'failed-title' : 'done-title', {
+                    title: this.getAttachmentTitle(attachment, true)
+                }),
                 true,
                 status === 1
             );
@@ -558,19 +599,20 @@ ZotMeta = {
                 progressHandle,
                 progress,
                 Utilities.formatBatchProgress(completed, attachments.length, created, failed, skipped),
-                "Creating parent items"
+                ZotMetaL10n.t('creating-parents')
             );
         }
 
-        var summary = created + " parent items created";
+        this.log('Parent batch completed: ' + JSON.stringify({ batchID: batch.id, total: completed, created, failed, skipped }));
+        var summary = ZotMetaL10n.t('created-count', { count: ZotMetaL10n.number(created) });
         if (failed > 0) {
-            summary += ", " + failed + " failed";
+            summary += ZotMetaL10n.t('list-separator') + ZotMetaL10n.t('failed-count', { count: ZotMetaL10n.number(failed) });
         }
         if (skipped > 0) {
-            summary += ", " + skipped + " skipped";
+            summary += ZotMetaL10n.t('list-separator') + ZotMetaL10n.t('skipped-count', { count: ZotMetaL10n.number(skipped) });
         }
-        summary += ".";
-        var title = failed > 0 ? "Parent item creation finished with issues" : "Parent items created";
+        summary += ZotMetaL10n.t('sentence-end');
+        var title = ZotMetaL10n.t(failed > 0 ? 'parents-with-issues' : 'parents-created');
         Utilities.publishFinishedProgress(progressHandle, summary, title, failed > 0);
     }
 };

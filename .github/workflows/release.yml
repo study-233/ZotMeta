@@ -10,8 +10,32 @@ permissions:
   pull-requests: write
 
 jobs:
-  build:
+  fork-release:
+    if: github.repository == 'study-233/ZotMeta'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    - name: Verify tag and build the tested fork package
+      run: |
+        version=$(node -p "require('./src/manifest.json').version")
+        test "$GITHUB_REF_NAME" = "v$version"
+        test -s "docs/releases/$GITHUB_REF_NAME.md"
+        python -B scripts/build.py
+        cd build
+        sha256sum -c "zotmeta-$version.xpi.sha256"
+    - name: Release fork package
+      uses: softprops/action-gh-release@v2
+      with:
+        body_path: docs/releases/${{ github.ref_name }}.md
+        fail_on_unmatched_files: true
+        files: |
+          build/*.xpi
+          build/*.xpi.sha256
 
+  build:
+    if: github.repository != 'study-233/ZotMeta'
     runs-on: ubuntu-latest
 
     steps:
@@ -23,8 +47,8 @@ jobs:
           tag=${GITHUB_REF#refs/tags/v}
           echo "RELEASE_VERSION=${tag}" >> "$GITHUB_ENV"
           echo "Generating release ${tag}..."
-          sed -i "s#<em:version>[0-9]*.[0-9]*</em:version>#<em:version>${tag}</em:version>#g" src/install.rdf
-          sed -i "s#\"version\": \"[0-9]*.[0-9]*\"#\"version\": \"${tag}\"#g" src/manifest.json
+          sed -E -i "s#<em:version>[0-9.]+</em:version>#<em:version>${tag}</em:version>#" src/install.rdf
+          sed -E -i "s#\"version\": \"[0-9.]+\"#\"version\": \"${tag}\"#" src/manifest.json
 
     - name: Make
       run: make clean && make

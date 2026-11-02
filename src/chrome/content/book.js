@@ -4,7 +4,7 @@ Book = {
     requestInterval: 1000,
     authorCache: new Map(),
 
-    request(path) {
+    request(path, reasons) {
         // Share the one-request-per-second allowance across all book workers.
         var request = this.requestQueue.then(async () => {
             var wait = this.requestInterval - (Date.now() - this.lastRequestTime);
@@ -12,21 +12,11 @@ Book = {
                 await Utilities.delay(wait);
             }
             this.lastRequestTime = Date.now();
-            var response = await Utilities.fetchWithTimeout('https://openlibrary.org' + path,
-                { method: 'GET' }, 10000);
-            if (!response || !response.ok) {
-                Zotero.debug('ZotMeta: Open Library request failed (' +
-                    (response ? response.status : 'no response') + '): ' + path);
-                return null;
-            }
-            var data = Utilities.parseJsonOrNull(await response.text());
-            if (!data) {
-                Zotero.debug('ZotMeta: Open Library returned invalid JSON: ' + path);
-            }
-            return data;
+            var text = await Utilities.requestMetadataText('Open Library ' + path, 'https://openlibrary.org' + path,
+                { method: 'GET' }, reasons);
+            return Utilities.parseJsonOrNull(text, 'Open Library ' + path, reasons);
         }).catch(error => {
-            Zotero.debug('ZotMeta: Open Library request failed: ' + path + ': ' + error);
-            return null;
+            return Utilities.lookupFailure(reasons, 'Open Library ' + path + ': ' + error);
         });
         this.requestQueue = request;
         return request;
@@ -100,7 +90,7 @@ Book = {
         }
     },
 
-    async getMetaData(item) {
+    async getMetaData(item, reasons) {
         if (item.itemTypeID !== Zotero.ItemTypes.getID('book')) {
             // Utilities.publishError("Unsupported Item Type", "Only Book is supported.")
             return null;
@@ -108,14 +98,14 @@ Book = {
         var rawISBN = item.getField('ISBN');
         var isbn = rawISBN ? rawISBN.replace(/[\s-]/g, '').toUpperCase() : '';
         if (!isbn) {
-            // Utilities.publishError("DOI not found", "DOI is required to retrieve metadata.")
-            return null;
+            return Utilities.lookupFailure(reasons, 'Open Library: missing ISBN', false);
         }
 
         // The legacy /api/books endpoint can return 404 even for existing editions.
-        var edition = await this.request('/isbn/' + encodeURIComponent(isbn) + '.json');
-        if (!edition || !edition.title) {
-            return null;
+        var edition = await this.request('/isbn/' + encodeURIComponent(isbn) + '.json', reasons);
+        if (!edition) return null;
+        if (!edition.title) {
+            return Utilities.lookupFailure(reasons, 'Open Library: edition record missing title');
         }
         var authors = await Promise.all((edition.authors || []).map(author => this.getAuthor(author)));
         return {
@@ -129,8 +119,8 @@ Book = {
         };
     },
 
-    async updateMetadata(item) {
-        var metaData = await this.getMetaData(item);
+    async updateMetadata(item, reasons) {
+        var metaData = await this.getMetaData(item, reasons);
         if (!metaData) {
             return 1;
         }
@@ -144,6 +134,7 @@ Book = {
             "Pages": "numPages"
         });
         if (!changed) {
+            reasons?.add('Open Library: no applicable fields in edition record');
             return 1;
         }
         await Utilities.saveItemTx(item);

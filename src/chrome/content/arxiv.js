@@ -3,7 +3,7 @@ Arxiv = {
     lastRequestTime: 0,
     requestInterval: 3000,
 
-    requestMetadata(arxivID) {
+    requestMetadata(arxivID, reasons) {
         // arXiv permits one connection and one request every three seconds.
         var request = this.requestQueue.then(async () => {
             var wait = this.requestInterval - (Date.now() - this.lastRequestTime);
@@ -12,12 +12,7 @@ Arxiv = {
             }
             this.lastRequestTime = Date.now();
             var url = 'https://export.arxiv.org/api/query?id_list=' + encodeURIComponent(arxivID);
-            var response = await Utilities.fetchWithTimeout(url, { method: 'GET' }, 10000);
-            if (!response || !response.ok) {
-                Zotero.debug('ZotMeta: arXiv lookup failed (' + (response ? response.status : 'no response') + ')');
-                return null;
-            }
-            return response.text();
+            return Utilities.requestMetadataText('arXiv', url, { method: 'GET' }, reasons);
         });
         this.requestQueue = request.catch(() => {});
         return request;
@@ -135,40 +130,40 @@ Arxiv = {
         return null;
     },
 
-    async getMetaData(item) {
+    async getMetaData(item, reasons) {
         var arxivID = this.getArxivID(item);
         if (!arxivID) {
-            return null;
+            return Utilities.lookupFailure(reasons, 'arXiv: missing arXiv identifier', false);
         }
         try {
-            var metadata = await this.getAtomMetaData(arxivID);
+            var metadata = await this.getAtomMetaData(arxivID, reasons);
             if (metadata) {
                 return metadata;
             }
         } catch (error) {
-            Zotero.debug('ZotMeta: arXiv lookup failed; trying DOI metadata: ' + error);
+            reasons?.add('arXiv: ' + error);
         }
         try {
-            return await this.getDOIMetaData(item, arxivID);
+            return await this.getDOIMetaData(item, arxivID, reasons);
         } catch (error) {
-            Zotero.debug('ZotMeta: arXiv DOI lookup failed: ' + error);
-            return null;
+            return Utilities.lookupFailure(reasons, 'arXiv DOI: ' + error);
         }
     },
 
-    async getDOIMetaData(item, arxivID) {
+    async getDOIMetaData(item, arxivID, reasons) {
         // The DOI describes the latest version; require a match for a pinned v1/v2/etc.
         var version = arxivID.match(/v(\d+)$/i);
         var doi = '10.48550/arXiv.' + arxivID.replace(/v\d+$/i, '');
-        var response = await Utilities.fetchWithTimeout('https://doi.org/' + doi, {
+        var text = await Utilities.requestMetadataText('arXiv DOI', 'https://doi.org/' + doi, {
             method: 'GET', headers: new Headers({ Accept: 'application/vnd.citationstyles.csl+json' })
-        }, 10000);
-        var data = Utilities.parseJsonOrNull(await Utilities.responseTextOrNull(response));
-        if (!data || !data.title || PubMed.normalizeDOI(data.DOI).toLowerCase() !== doi.toLowerCase()) {
-            return null;
+        }, reasons);
+        var data = Utilities.parseJsonOrNull(text, 'arXiv DOI', reasons);
+        if (!data) return null;
+        if (!data.title || PubMed.normalizeDOI(data.DOI).toLowerCase() !== doi.toLowerCase()) {
+            return Utilities.lookupFailure(reasons, 'arXiv DOI: missing title or requested DOI in response');
         }
         if (version && String(data.version) !== version[1]) {
-            return null;
+            return Utilities.lookupFailure(reasons, 'arXiv DOI: response does not match requested version v' + version[1], false);
         }
         var date = Journal.getPublicationDate(data);
         var existingDate = item.getField('date') || '';
@@ -188,8 +183,8 @@ Arxiv = {
         };
     },
 
-    getAtomMetaData(arxivID) {
-        return this.requestMetadata(arxivID)
+    getAtomMetaData(arxivID, reasons) {
+        return this.requestMetadata(arxivID, reasons)
             .then(data => {
                 if (!data) {
                     return null;
@@ -198,21 +193,21 @@ Arxiv = {
                     var parser = new DOMParser();
                     var xmlDoc = parser.parseFromString(data, "application/xml");
                     if (xmlDoc.getElementsByTagName('parsererror').length > 0) {
-                        return null;
+                        return Utilities.lookupFailure(reasons, 'arXiv: invalid Atom XML response');
                     }
                     var entry = xmlDoc.getElementsByTagName('entry')[0];
                     if (!entry) {
-                        return null;
+                        return Utilities.lookupFailure(reasons, 'arXiv: no entry returned for ' + arxivID);
                     }
                     var returnedID = this.normalizeArxivID(this.getTextContent(entry, 'id'));
                     if (!returnedID || returnedID.replace(/v\d+$/i, '') !== arxivID.replace(/v\d+$/i, '') ||
                         (/v\d+$/i.test(arxivID) && returnedID !== arxivID)) {
-                        return null;
+                        return Utilities.lookupFailure(reasons, 'arXiv: entry does not match requested identifier ' + arxivID);
                     }
 
                     var Title = this.getTextContent(entry, 'title');
                     if (!Title) {
-                        return null;
+                        return Utilities.lookupFailure(reasons, 'arXiv: entry missing title');
                     }
                     var Authors = this.generateAuthors(entry.getElementsByTagName('author'));
                     var PublishDate = this.generateDate(this.getTextContent(entry, 'published'));
@@ -234,13 +229,13 @@ Arxiv = {
                         "Category": Category ? Category : ""
                     };
                 } catch (error) {
-                    return null;
+                    return Utilities.lookupFailure(reasons, 'arXiv: could not read Atom entry: ' + error);
                 }
             });
     },
 
-    async updateMetadata(item) {
-        var metaData = await this.getMetaData(item);
+    async updateMetadata(item, reasons) {
+        var metaData = await this.getMetaData(item, reasons);
         if (!metaData) {
             return 1;
         }
@@ -250,13 +245,15 @@ Arxiv = {
             "Authors": "creators",
             "PublishDate": "date",
             "Abstract": "abstractNote",
-            "JournalRef": "publicationTitle",
             "DOI": "DOI",
             "Repository": "repository",
             "ArchiveID": "archiveID",
             "URL": "url"
         });
+        // A preprint has no publicationTitle. Preserve arXiv's free-form citation in Extra.
+        changed = Utilities.applyExtraFields(item, { 'arXiv journal ref': metaData.JournalRef }) || changed;
         if (!changed) {
+            reasons?.add('arXiv: no applicable fields in returned metadata');
             return 1;
         }
         await Utilities.saveItemTx(item);

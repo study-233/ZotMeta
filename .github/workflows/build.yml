@@ -16,7 +16,12 @@ jobs:
       uses: actions/checkout@v4
     
     - name: Make
+      if: github.repository != 'study-233/ZotMeta'
       run: make
+
+    - name: Build fork package
+      if: github.repository == 'study-233/ZotMeta'
+      run: python -B scripts/build.py
     
     - name: Upload artifact
       uses: actions/upload-artifact@v4

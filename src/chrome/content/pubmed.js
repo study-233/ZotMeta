@@ -22,7 +22,7 @@ PubMed = {
         };
     },
 
-    request(endpoint, parameters) {
+    request(endpoint, parameters, reasons) {
         var query = Object.keys(parameters).map(key => encodeURIComponent(key) + '=' +
             encodeURIComponent(parameters[key])).join('&');
         var url = this.baseURL + endpoint + '?tool=ZotMeta&' + query;
@@ -33,14 +33,13 @@ PubMed = {
                 await Utilities.delay(wait);
             }
             this.lastRequestTime = Date.now();
-            var response = await Utilities.fetchWithTimeout(url, { method: 'GET' }, 10000);
-            return Utilities.responseTextOrNull(response);
+            return Utilities.requestMetadataText('PubMed ' + endpoint, url, { method: 'GET' }, reasons);
         });
         this.requestQueue = request.catch(() => {});
         return request;
     },
 
-    async getMetaData(item) {
+    async getMetaData(item, reasons) {
         var identifiers = this.getIdentifiers(item);
         var pmid = identifiers.PMID;
         if (!pmid) {
@@ -50,31 +49,36 @@ PubMed = {
             } else if (identifiers.PMCID) {
                 term = identifiers.PMCID + '[PMC]';
             } else {
-                return null;
+                return Utilities.lookupFailure(reasons, 'PubMed: missing DOI, PMID and PMCID', false);
             }
             var result = Utilities.parseJsonOrNull(await this.request('esearch.fcgi', {
                 db: 'pubmed', term, retmode: 'json', retmax: 2
-            }));
-            var search = result && result.esearchresult;
+            }, reasons), 'PubMed search', reasons);
+            if (!result) return null;
+            var search = result.esearchresult;
             // Do not overwrite metadata using an ambiguous identifier match.
+            if (search && search.count != null && Number(search.count) !== 1) {
+                return Utilities.lookupFailure(reasons, 'PubMed: search returned ' + search.count + ' matches (expected one)', false);
+            }
             if (!search || Number(search.count) !== 1 || !search.idlist || search.idlist.length !== 1 ||
                 !/^\d+$/.test(search.idlist[0])) {
-                return null;
+                return Utilities.lookupFailure(reasons, 'PubMed: invalid search result or PMID');
             }
             pmid = search.idlist[0];
         }
         var metadata = this.parseMetadata(await this.request('efetch.fcgi', {
             db: 'pubmed', id: pmid, retmode: 'xml'
-        }));
-        if (!metadata || metadata.PMID !== pmid) {
-            return null;
+        }, reasons), reasons);
+        if (!metadata) return null;
+        if (metadata.PMID !== pmid) {
+            return Utilities.lookupFailure(reasons, 'PubMed: returned PMID does not match item');
         }
         if (identifiers.DOI && (!metadata.DOI ||
             this.normalizeDOI(metadata.DOI).toLowerCase() !== identifiers.DOI.toLowerCase())) {
-            return null;
+            return Utilities.lookupFailure(reasons, 'PubMed: returned DOI does not match item');
         }
         if (identifiers.PMCID && metadata.PMCID !== identifiers.PMCID) {
-            return null;
+            return Utilities.lookupFailure(reasons, 'PubMed: returned PMCID does not match item');
         }
         return metadata;
     },
@@ -118,17 +122,17 @@ PubMed = {
         return year + '-' + month.padStart(2, '0') + (day ? '-' + day.padStart(2, '0') : '');
     },
 
-    parseMetadata(xml) {
+    parseMetadata(xml, reasons) {
         if (!xml) {
             return null;
         }
         var document = new DOMParser().parseFromString(xml, 'application/xml');
         if (document.getElementsByTagName('parsererror').length) {
-            return null;
+            return Utilities.lookupFailure(reasons, 'PubMed: invalid XML response');
         }
         var records = document.getElementsByTagName('PubmedArticle');
         if (records.length !== 1) {
-            return null;
+            return Utilities.lookupFailure(reasons, 'PubMed: response contained ' + records.length + ' articles (expected one)');
         }
         var record = records[0];
         var citation = this.first(record, 'MedlineCitation');
@@ -136,7 +140,7 @@ PubMed = {
         var title = this.text(article, 'ArticleTitle');
         var pmid = this.text(citation, 'PMID');
         if (!title || !/^\d+$/.test(pmid)) {
-            return null;
+            return Utilities.lookupFailure(reasons, 'PubMed: record missing title or valid PMID');
         }
         var journal = this.first(article, 'Journal');
         var issue = this.first(journal, 'JournalIssue');
@@ -207,31 +211,6 @@ PubMed = {
     },
 
     applyIdentifiers(item, metadata) {
-        var original = item.getField('extra') || '';
-        var extra = original;
-        for (var key of ['PMID', 'PMCID']) {
-            var value = metadata[key];
-            if (!value) {
-                continue;
-            }
-            var line = key + ': ' + value;
-            var pattern = new RegExp('^[ \\t]*' + key + '[ \\t]*:[^\\r\\n]*', 'gim');
-            var found = false;
-            extra = extra.replace(pattern, () => {
-                if (found) {
-                    return '';
-                }
-                found = true;
-                return line;
-            });
-            if (!found) {
-                extra += (extra && !/[\r\n]$/.test(extra) ? '\n' : '') + line;
-            }
-        }
-        if (extra === original) {
-            return false;
-        }
-        item.setField('extra', extra);
-        return true;
+        return Utilities.applyExtraFields(item, { PMID: metadata.PMID, PMCID: metadata.PMCID });
     }
 };

@@ -29,13 +29,13 @@ Screenshots can be stored in [`docs/screenshots`](docs/screenshots).
 
 ## Installation
 
-1. Download the latest `.xpi` file from [GitHub Releases](https://github.com/RoadToDream/ZotMeta/releases).
+1. Download the fork's `.xpi` file from [GitHub Releases](https://github.com/study-233/ZotMeta/releases).
 2. In Zotero, open `Tools -> Add-ons`.
 3. Click the gear icon and choose `Install Add-on From File...`.
 4. Select the downloaded `.xpi` file.
 5. Restart Zotero if prompted.
 
-ZotMeta 2.1 declares compatibility with Zotero 7.0 through 10.0.x.
+ZotMeta 2.1.2 declares compatibility with Zotero 7.0 through 10.0.x. The target for this build is Zotero 10.0.7 on Windows.
 
 ## Usage
 
@@ -108,6 +108,14 @@ Disabling failure tagging stops new failure tags; it does not clear existing tag
 
 ## Development
 
+For the Windows private build with dark appearance and Simplified Chinese support,
+run `python scripts/build.py`. This runs all tests and creates an XPI that retains
+Zotero's required HTTPS update URL and disables background updates for ZotMeta
+at private-build startup. See
+[Windows 安装与验收说明](docs/WINDOWS-TESTING.zh-CN.md) for installation, verification
+status, and the manual acceptance checklist. The upstream `make` flow below retains
+the source manifests' update settings.
+
 Run tests:
 
 ```bash
@@ -123,6 +131,14 @@ make
 The build artifact is written to `build/zotmeta-<version>.xpi`.
 
 ## Release Flow
+
+For `study-233/ZotMeta`, prepare the notes in `docs/releases/v<version>.md` and run
+`python -B scripts/build.py`. Pushing a matching version tag to the fork triggers
+the release job. It builds the XPI from the tagged source, verifies the checksum
+and publishes both files with the release notes. The fork package disables its
+own background updates at startup.
+
+### Upstream release flow
 
 Zotero checks the `update_url` in `src/manifest.json`, which points to
 `https://raw.githubusercontent.com/RoadToDream/ZotMeta/master/updates.json`.

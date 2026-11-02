@@ -1,4 +1,5 @@
 content   zotmeta             chrome/content/
 skin      zotmeta   default   chrome/skin/
 locale    zotmeta   en-US     chrome/locale/en-US/
+locale    zotmeta   zh-CN     chrome/locale/zh-CN/
 overlay	chrome://zotero/content/zoteroPane.xul chrome://zotmeta/content/overlay.xul

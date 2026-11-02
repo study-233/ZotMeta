@@ -70,43 +70,40 @@ Journal = {
         return Utilities.combineTitleAndSubtitle(Title, Subtitle);
     },
 
-    async getMetaData(item) {
+    async getMetaData(item, reasons) {
         if (item.itemTypeID !== Zotero.ItemTypes.getID('journalArticle')) {
             return null;
         }
         for (var source of Utilities.getJournalSourceOrder()) {
             try {
-                var metadata = source === 'doi' ? await this.getDOIMetaData(item) : await PubMed.getMetaData(item);
+                var metadata = source === 'doi' ? await this.getDOIMetaData(item, reasons) : await PubMed.getMetaData(item, reasons);
                 if (metadata && Object.values(metadata).some(value =>
                     value !== undefined && value !== null && !Utilities.isEmpty(value))) {
                     return metadata;
                 }
+                if (metadata) reasons?.add(source + ': no usable metadata fields in response');
             } catch (error) {
-                Zotero.debug('ZotMeta: ' + source + ' lookup failed: ' + error);
+                reasons?.add(source + ': ' + error);
             }
         }
         return null;
     },
 
-    getDOIMetaData(item) {
+    getDOIMetaData(item, reasons) {
         if (item.itemTypeID !== Zotero.ItemTypes.getID('journalArticle')) {
             // Utilities.publishError("Unsupported Item Type", "Only Journal Article is supported.")
             return null;
         }
-        var doi = item.getField('DOI');
+        var doi = PubMed.normalizeDOI(item.getField('DOI'));
         if (!doi) {
-            // Utilities.publishError("DOI not found", "DOI is required to retrieve metadata.")
-            return null;
+            return Utilities.lookupFailure(reasons, 'DOI: missing DOI', false);
         }
-        doi = PubMed.normalizeDOI(doi);
 
         var url = 'https://doi.org/' + encodeURI(doi).replace(/\?/g, '%3F').replace(/#/g, '%23');
         const headers = new Headers({'Accept': 'application/vnd.citationstyles.csl+json'});
         var requestInfo = { method: 'GET', headers };
-        return Utilities.fetchWithTimeout(url, requestInfo, 10000)
-            .then(response => Utilities.responseTextOrNull(response, "Error retrieving metadata",
-                "Please check if DOI is correct and if you have network access to doi.org."))
-            .then(data => data ? Utilities.parseJsonOrNull(data) : null)
+        return Utilities.requestMetadataText('DOI', url, requestInfo, reasons)
+            .then(data => Utilities.parseJsonOrNull(data, 'DOI', reasons))
             .then(dataJson => {
                 if (!dataJson) {
                     return null;
@@ -134,8 +131,8 @@ Journal = {
             });
     },
 
-    async updateMetadata(item) {
-        var metaData = await this.getMetaData(item);
+    async updateMetadata(item, reasons) {
+        var metaData = await this.getMetaData(item, reasons);
         if (!metaData) {
             return 1;
         }
@@ -155,6 +152,7 @@ Journal = {
         });
         changed = PubMed.applyIdentifiers(item, metaData) || changed;
         if (!changed) {
+            reasons?.add('Journal: no applicable fields or identifiers in returned metadata');
             return 1;
         }
         await Utilities.saveItemTx(item);

@@ -1,0 +1,94 @@
+/* Inherit Zotero's selected appearance, including an app override on Windows.
+   Do not infer the app theme from the operating system. */
+#zotmeta-preferences,
+.zotmeta-progress-panel {
+    --zotmeta-bg: var(--color-background, Canvas);
+    --zotmeta-page: var(--color-sidepane, var(--zotmeta-bg));
+    --zotmeta-panel: color-mix(in srgb, var(--zotmeta-bg) 55%, var(--zotmeta-page));
+    --zotmeta-panel-border: var(--color-border50, var(--zotmeta-border));
+    --zotmeta-fg: var(--fill-primary, CanvasText);
+    --zotmeta-muted: var(--fill-secondary, GrayText);
+    --zotmeta-border: var(--color-border, ButtonBorder);
+    --zotmeta-control: var(--color-button, ButtonFace);
+    --zotmeta-hover: var(--fill-quinary, ButtonFace);
+    --zotmeta-track: var(--fill-quarternary, ButtonFace);
+    --zotmeta-accent: var(--accent-blue, #4072e5);
+    /* Derive colors from the actual app surface/text, without an OS theme query. */
+    --zotmeta-link: color-mix(in srgb, var(--zotmeta-fg) 32%, #4072e5);
+    --zotmeta-heat-0: color-mix(in srgb, var(--zotmeta-bg) 90%, var(--zotmeta-fg));
+    --zotmeta-heat-4: color-mix(in srgb, #2da44e 72%, var(--zotmeta-fg));
+    --zotmeta-heat-1: color-mix(in srgb, var(--zotmeta-heat-4) 45%, var(--zotmeta-bg));
+    --zotmeta-heat-2: color-mix(in srgb, var(--zotmeta-heat-4) 65%, var(--zotmeta-bg));
+    --zotmeta-heat-3: color-mix(in srgb, var(--zotmeta-heat-4) 82%, var(--zotmeta-bg));
+}
+
+#zotmeta-preferences :is(button, input, select, a):focus-visible,
+.zotmeta-progress-close:focus-visible {
+    outline: 2px solid var(--zotmeta-accent);
+    outline-offset: 3px;
+}
+
+#zotmeta-preferences :is(button, input, select):disabled {
+    color: var(--zotmeta-muted);
+    cursor: default;
+}
+
+#zotmeta-preferences :is(button, select, input) {
+    accent-color: var(--zotmeta-accent);
+}
+
+#zotmeta-preferences :is(select, option) {
+    color: var(--zotmeta-fg);
+    background: var(--zotmeta-control);
+}
+
+#zotmeta-preferences .zotmeta-pref-icon-button:hover:enabled,
+.zotmeta-progress-close:hover {
+    background: var(--zotmeta-hover);
+}
+
+#zotmeta-preferences .zotmeta-pref-button:hover:enabled {
+    filter: brightness(1.15);
+}
+
+#zotmeta-preferences .zotmeta-pref-link:hover {
+    text-decoration: underline;
+}
+
+.zotmeta-pref-setting,
+.zotmeta-pref-section-card-head {
+    flex-wrap: wrap;
+}
+
+.zotmeta-pref-card,
+.zotmeta-pref-setting-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.zotmeta-pref-activity-legend {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    justify-content: flex-end;
+    color: var(--zotmeta-muted);
+    font-size: 12px;
+}
+
+.zotmeta-pref-activity-legend .zotmeta-pref-activity-cell {
+    --zotmeta-activity-cell: 10px;
+    flex: 0 0 auto;
+}
+
+@media (max-width: 600px) {
+    #zotmeta-preferences .zotmeta-pref-card-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    #zotmeta-preferences .zotmeta-pref-type-row {
+        grid-template-columns: minmax(80px, 1fr) minmax(40px, 2fr) max-content;
+    }
+    #zotmeta-preferences .zotmeta-pref-select {
+        flex-basis: 100%;
+    }
+}

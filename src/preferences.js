@@ -26,6 +26,10 @@ var ZotMetaPreferences = {
             this.scheduleInit();
             return;
         }
+        if (!ZotMetaL10n.rootURI) {
+            var pane = Zotero.PreferencePanes.pluginPanes.find(pane => pane.id === 'zotmeta-prefpane');
+            ZotMetaL10n.init(pane.src.replace(/preferences\.xhtml$/, ''));
+        }
         if (!this.initialized) {
             root.addEventListener("showing", () => this.init());
             this.initialized = true;
@@ -33,10 +37,33 @@ var ZotMetaPreferences = {
         this.init();
     },
 
-    init() {
+    async init() {
+        await this.safeRenderAsync(() => this.localize(), 'localization');
         this.safeRender(() => this.renderSettings(), "settings");
         this.safeRender(() => this.renderProjectInfo(), "project");
         this.safeRenderAsync(() => this.renderStats(), "stats");
+    },
+
+    async localize() {
+        var root = document.getElementById('zotmeta-preferences');
+        // Explicit locales prevent an unsupported UI language negotiating zh-CN.
+        var l10n = new window.Localization(['zotmeta.ftl'], false, undefined,
+            [ZotMetaL10n.locale, 'en-US']);
+        var elements = Array.from(root.querySelectorAll('[data-l10n-id], [data-zotmeta-l10n-id]'));
+        var keys = elements.map(element => {
+            var id = element.getAttribute('data-l10n-id') || element.getAttribute('data-zotmeta-l10n-id');
+            element.setAttribute('data-zotmeta-l10n-id', id);
+            element.removeAttribute('data-l10n-id');
+            return id;
+        });
+        var messages = await l10n.formatMessages(keys);
+        messages.forEach((message, index) => {
+            if (!message) return;
+            if (message.value !== null) elements[index].textContent = message.value;
+            for (let attribute of message.attributes || []) {
+                elements[index].setAttribute(attribute.name, attribute.value);
+            }
+        });
     },
 
     safeRender(callback, section) {
@@ -192,12 +219,7 @@ var ZotMetaPreferences = {
     },
 
     getItemTypeLabel(item) {
-        try {
-            if (Zotero.ItemTypes && typeof Zotero.ItemTypes.getName === 'function') {
-                return Zotero.ItemTypes.getName(item.itemTypeID);
-            }
-        } catch (error) {}
-        return String(item.itemTypeID || "unknown");
+        return ZotMetaL10n.itemType(item.itemTypeID);
     },
 
     async getLibraryStats() {
@@ -302,7 +324,7 @@ var ZotMetaPreferences = {
                 regularParams
             );
             stats.typeDistribution = typeRows.map(row => ({
-                label: row.label,
+                label: ZotMetaL10n.itemType(row.label),
                 count: row.count
             }));
             return stats;
@@ -464,15 +486,15 @@ var ZotMetaPreferences = {
         }
         cards.textContent = "";
         var values = [
-            ["Total items", stats.totalItems],
-            ["Attachments", stats.attachments],
-            ["Failed", stats.failed],
-            ["Skipped", stats.skipped]
+            ["total-items", stats.totalItems],
+            ["attachments", stats.attachments],
+            ["failed", stats.failed],
+            ["skipped", stats.skipped]
         ];
         for (let value of values) {
             var card = this.createElement("div", "zotmeta-pref-card");
-            var cardValue = this.createElement("div", "zotmeta-pref-card-value", value[1]);
-            var label = this.createElement("div", "zotmeta-pref-card-label", value[0]);
+            var cardValue = this.createElement("div", "zotmeta-pref-card-value", ZotMetaL10n.number(value[1]));
+            var label = this.createElement("div", "zotmeta-pref-card-label", ZotMetaL10n.t(value[0]));
             card.appendChild(cardValue);
             card.appendChild(label);
             cards.appendChild(card);
@@ -485,7 +507,7 @@ var ZotMetaPreferences = {
         typeList.textContent = "";
         var types = stats.typeDistribution.slice(0, 8);
         if (types.length === 0) {
-            var empty = this.createElement("div", "zotmeta-pref-info", "No regular items found.");
+            var empty = this.createElement("div", "zotmeta-pref-info", ZotMetaL10n.t('no-regular-items'));
             typeList.appendChild(empty);
         } else {
             for (let type of types) {
@@ -494,7 +516,7 @@ var ZotMetaPreferences = {
                 var bar = this.createElement("div", "zotmeta-pref-type-bar");
                 var fill = this.createElement("div", "zotmeta-pref-type-fill");
                 fill.style.width = (stats.totalItems > 0 ? Math.round(type.count / stats.totalItems * 100) : 0) + "%";
-                var count = this.createElement("div", null, type.count);
+                var count = this.createElement("div", null, ZotMetaL10n.number(type.count));
                 bar.appendChild(fill);
                 row.appendChild(label);
                 row.appendChild(bar);
@@ -516,15 +538,20 @@ var ZotMetaPreferences = {
         }
 
         grid.textContent = "";
-        year.textContent = activity.year;
-        summary.textContent = (activity.total || 0) + " regular items added";
+        summary.removeAttribute('data-l10n-id');
+        year.textContent = new Intl.NumberFormat(ZotMetaL10n.formatLocale, { useGrouping: false }).format(activity.year);
+        summary.textContent = ZotMetaL10n.t('activity-summary', { count: ZotMetaL10n.number(activity.total || 0) });
         previous.disabled = false;
         next.disabled = !activity.canGoNext;
         this.bindActivityNavigation(previous, next);
         this.setActivityCellSize(grid, activity.days.length);
         for (let day of activity.days) {
             var cell = this.createElement("div", "zotmeta-pref-activity-cell level-" + this.getActivityLevel(day.count, activity.max));
-            cell.setAttribute("title", day.key + ": " + day.count + " added");
+            var title = ZotMetaL10n.t(!day.inRange ? 'activity-outside' : day.isFuture ? 'activity-future' : 'activity-tip', {
+                date: ZotMetaL10n.date(this.parseDateAdded(day.key)), count: ZotMetaL10n.number(day.count)
+            });
+            cell.setAttribute("title", title);
+            cell.setAttribute("aria-label", title);
             if (!day.inRange) {
                 cell.className += " is-outside";
             }
@@ -533,6 +560,28 @@ var ZotMetaPreferences = {
             }
             grid.appendChild(cell);
         }
+        this.renderActivityLegend(activity.max);
+    },
+
+    renderActivityLegend(max) {
+        var legend = document.getElementById('zotmeta-pref-activity-legend');
+        if (!legend) return;
+        legend.textContent = '';
+        legend.appendChild(this.createElement('span', null, ZotMetaL10n.t('legend-less')));
+        for (let level = 0; level <= 4; level++) {
+            var cell = this.createElement('div', 'zotmeta-pref-activity-cell level-' + level);
+            // Compute the actual count interval using the very same level function.
+            var min = level === 4 ? Math.max(1, Math.floor(max * 3 / 4) + 1) : Math.floor(max * (level - 1) / 4) + 1;
+            var upper = level === 4 ? max : Math.floor(max * level / 4);
+            var title = level === 0 ? ZotMetaL10n.t('legend-zero') :
+                (max > 0 && min <= upper ? ZotMetaL10n.t('legend-range', {
+                    min: ZotMetaL10n.number(min), max: ZotMetaL10n.number(upper)
+                }) : ZotMetaL10n.t('legend-level', { level: ZotMetaL10n.number(level) }));
+            cell.setAttribute('title', title);
+            cell.setAttribute('aria-label', title);
+            legend.appendChild(cell);
+        }
+        legend.appendChild(this.createElement('span', null, ZotMetaL10n.t('legend-more')));
     },
 
     bindActivityNavigation(previous, next) {
@@ -585,7 +634,7 @@ var ZotMetaPreferences = {
                 Zotero.launchURL("https://github.com/RoadToDream/ZotMeta");
             }
         });
-        var note = this.createElement("span", null, " - Star ZotMeta if it helps.");
+        var note = this.createElement("span", null, ZotMetaL10n.t('project-note'));
         project.appendChild(link);
         project.appendChild(note);
     }

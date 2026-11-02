@@ -2,6 +2,7 @@ Utilities = {
     modernProgressStyleID: "zotmeta-progress-style",
     concurrentThreadsPref: "extensions.zotmeta.concurrentThreads",
     itemSaveQueue: Promise.resolve(),
+    sourceCooldowns: new Map(),
     failedTag: "ZotMeta: Failed",
     skippedTag: "ZotMeta: Skipped",
     journalSourcePref: "extensions.zotmeta.journalSource",
@@ -26,26 +27,30 @@ Utilities = {
         }
         var style = this.createElement(doc, "style");
         style.id = this.modernProgressStyleID;
+        var theme = this.createElement(doc, "link");
+        theme.setAttribute('rel', 'stylesheet');
+        theme.setAttribute('href', ZotMetaL10n.rootURI + 'theme.css');
+        doc.documentElement.appendChild(theme);
         style.textContent = [
-            ".zotmeta-progress-panel{position:fixed;right:18px;bottom:18px;width:360px;max-width:calc(100vw - 36px);z-index:2147483647;background:rgba(250,250,250,.96);border:1px solid rgba(0,0,0,.16);border-radius:8px;box-shadow:0 18px 44px rgba(0,0,0,.24),0 2px 8px rgba(0,0,0,.12);font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1f2328;overflow:hidden;backdrop-filter:saturate(1.2) blur(18px)}",
+            ".zotmeta-progress-panel{position:fixed;right:18px;bottom:18px;width:360px;max-width:calc(100vw - 36px);z-index:2147483647;background:var(--zotmeta-bg);border:1px solid var(--zotmeta-border);border-radius:8px;box-shadow:0 18px 44px rgba(0,0,0,.24),0 2px 8px rgba(0,0,0,.12);font:13px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:var(--zotmeta-fg);overflow:hidden;backdrop-filter:saturate(1.2) blur(18px)}",
             ".zotmeta-progress-header{display:flex;align-items:flex-start;gap:10px;padding:12px 12px 8px}",
-            ".zotmeta-progress-mark{width:20px;height:20px;border-radius:50%;background:#2563eb;box-shadow:inset 0 0 0 5px rgba(255,255,255,.72);flex:0 0 auto;margin-top:1px}",
+            ".zotmeta-progress-mark{width:20px;height:20px;border-radius:50%;background:var(--zotmeta-accent);box-shadow:inset 0 0 0 5px rgba(255,255,255,.72);flex:0 0 auto;margin-top:1px}",
             ".zotmeta-progress-title{font-weight:650;font-size:13px;line-height:1.25;margin:0 0 3px}",
-            ".zotmeta-progress-summary{font-size:12px;line-height:1.35;color:#5f6672;overflow-wrap:anywhere}",
-            ".zotmeta-progress-close{appearance:none;border:0;background:transparent;color:#6b7280;font-size:17px;line-height:1;padding:0 2px;cursor:pointer;margin-left:auto}",
-            ".zotmeta-progress-close:hover{color:#111827}",
-            ".zotmeta-progress-track{height:6px;background:#e7eaf0;border-radius:999px;overflow:hidden;margin:0 12px 10px}",
+            ".zotmeta-progress-summary{font-size:12px;line-height:1.35;color:var(--zotmeta-muted);overflow-wrap:anywhere}",
+            ".zotmeta-progress-close{appearance:none;border:0;background:transparent;color:var(--zotmeta-muted);font-size:17px;line-height:1;padding:0 2px;cursor:pointer;margin-left:auto}",
+            ".zotmeta-progress-close:hover{color:var(--zotmeta-fg)}",
+            ".zotmeta-progress-track{height:6px;background:var(--zotmeta-track);border-radius:999px;overflow:hidden;margin:0 12px 10px}",
             ".zotmeta-progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#2563eb,#14b8a6);border-radius:999px;transition:width .22s ease}",
-            ".zotmeta-progress-rows{border-top:1px solid rgba(0,0,0,.08);max-height:220px;overflow:auto}",
+            ".zotmeta-progress-rows{border-top:1px solid var(--zotmeta-border);max-height:220px;overflow:auto}",
             ".zotmeta-progress-row{padding:9px 12px 10px}",
-            ".zotmeta-progress-row+.zotmeta-progress-row{border-top:1px solid rgba(0,0,0,.07)}",
-            ".zotmeta-progress-row-text{font-size:12px;line-height:1.35;color:#374151;overflow-wrap:anywhere}",
-            ".zotmeta-progress-row-track{height:4px;background:#edf0f4;border-radius:999px;overflow:hidden;margin-top:7px}",
-            ".zotmeta-progress-row-fill{height:100%;width:0%;background:#2563eb;border-radius:999px;transition:width .22s ease}",
-            ".zotmeta-progress-row.is-error .zotmeta-progress-row-fill,.zotmeta-progress-panel.is-error .zotmeta-progress-fill{background:#dc2626}",
-            ".zotmeta-progress-row.is-done:not(.is-error) .zotmeta-progress-row-fill,.zotmeta-progress-panel.is-done:not(.is-error) .zotmeta-progress-fill{background:#16a34a}",
-            ".zotmeta-progress-panel.is-error .zotmeta-progress-mark{background:#dc2626}",
-            ".zotmeta-progress-panel.is-done:not(.is-error) .zotmeta-progress-mark{background:#16a34a}"
+            ".zotmeta-progress-row+.zotmeta-progress-row{border-top:1px solid var(--zotmeta-border)}",
+            ".zotmeta-progress-row-text{font-size:12px;line-height:1.35;color:var(--zotmeta-fg);overflow-wrap:anywhere}",
+            ".zotmeta-progress-row-track{height:4px;background:var(--zotmeta-track);border-radius:999px;overflow:hidden;margin-top:7px}",
+            ".zotmeta-progress-row-fill{height:100%;width:0%;background:var(--zotmeta-accent);border-radius:999px;transition:width .22s ease}",
+            ".zotmeta-progress-row.is-error .zotmeta-progress-row-fill,.zotmeta-progress-panel.is-error .zotmeta-progress-fill{background:var(--color-invalid, #dc2626)}",
+            ".zotmeta-progress-row.is-done:not(.is-error) .zotmeta-progress-row-fill,.zotmeta-progress-panel.is-done:not(.is-error) .zotmeta-progress-fill{background:var(--accent-green, #16a34a)}",
+            ".zotmeta-progress-panel.is-error .zotmeta-progress-mark{background:var(--color-invalid, #dc2626)}",
+            ".zotmeta-progress-panel.is-done:not(.is-error) .zotmeta-progress-mark{background:var(--accent-green, #16a34a)}"
         ].join("\n");
         doc.documentElement.appendChild(style);
     },
@@ -95,7 +100,7 @@ Utilities = {
         var rows = this.createElement(doc, "div", "zotmeta-progress-rows");
 
         closeButton.setAttribute("type", "button");
-        closeButton.setAttribute("aria-label", "Close ZotMeta progress");
+        closeButton.setAttribute("aria-label", ZotMetaL10n.t('close-progress'));
         closeButton.addEventListener("click", () => {
             if (panel.parentNode) {
                 panel.parentNode.removeChild(panel);
@@ -320,18 +325,54 @@ Utilities = {
         });
     },
 
-    async responseTextOrNull(response, errorTitle, errorMessage) {
-        if (!response || !response.ok) {
-            return null;
-        }
-        return response.text();
+    lookupFailure(reasons, message, retryable = true) {
+        reasons?.add(message, retryable);
+        return null;
     },
 
-    parseJsonOrNull(data) {
+    async requestMetadataText(source, url, options, reasons) {
+        var host = new URL(url).hostname;
+        var cooldown = this.sourceCooldowns.get(host);
+        if (!cooldown || cooldown.until <= Date.now()) {
+            var response = await this.fetchWithTimeout(url, options, 10000);
+            if (response?.status !== 429) {
+                if (response?.ok && this.sourceCooldowns.get(host) === cooldown) {
+                    this.sourceCooldowns.delete(host);
+                }
+                return this.responseTextOrNull(response, source, reasons);
+            }
+
+            // In-flight responses may already have extended this host's cooldown.
+            var now = Date.now();
+            cooldown = this.sourceCooldowns.get(host);
+            var backoff = cooldown?.until > now ? cooldown.backoff : Math.min((cooldown?.backoff || 1000) * 2, 30000);
+            var header = response.headers?.get('Retry-After')?.trim() || '';
+            var until = now + backoff;
+            if (/^\d+$/.test(header)) {
+                until = now + Number(header) * 1000;
+            } else if (/^[a-z]{3}/i.test(header) && Number.isFinite(Date.parse(header))) {
+                until = Math.max(now, Date.parse(header));
+            }
+            cooldown = { until: Math.max(until, cooldown?.until || 0), backoff };
+            this.sourceCooldowns.set(host, cooldown);
+        }
+        reasons?.add(source + ': HTTP 429 (rate limited; retry later)', false, cooldown.until);
+        return null;
+    },
+
+    async responseTextOrNull(response, source, reasons) {
+        if (!response || !response.ok) {
+            return this.lookupFailure(reasons, source + ': ' + (response ? 'HTTP ' + response.status : 'no response'));
+        }
+        return await response.text() || this.lookupFailure(reasons, source + ': empty response body');
+    },
+
+    parseJsonOrNull(data, source, reasons) {
+        if (data === null) return null; // The request already recorded its failure.
         try {
-            return JSON.parse(data);
+            return JSON.parse(data) || this.lookupFailure(reasons, source + ': empty JSON record');
         } catch (error) {
-            return null;
+            return this.lookupFailure(reasons, source + ': invalid JSON response');
         }
     },
 
@@ -433,6 +474,34 @@ Utilities = {
             changed = true;
         }
         return changed;
+    },
+
+    applyExtraFields(item, fields) {
+        var original = item.getField('extra') || '';
+        var extra = original;
+        for (var [key, value] of Object.entries(fields)) {
+            if (!value) {
+                continue;
+            }
+            var line = key + ': ' + this.normalizeWhitespace(value);
+            var pattern = new RegExp('^[ \\t]*' + key + '[ \\t]*:[^\\r\\n]*', 'gim');
+            var found = false;
+            extra = extra.replace(pattern, () => {
+                if (found) {
+                    return '';
+                }
+                found = true;
+                return line;
+            });
+            if (!found) {
+                extra += (extra && !/[\r\n]$/.test(extra) ? '\n' : '') + line;
+            }
+        }
+        if (extra === original) {
+            return false;
+        }
+        item.setField('extra', extra);
+        return true;
     },
 
     saveItemTx(item) {
@@ -615,13 +684,19 @@ Utilities = {
 
     getItemDisplayTitle(item) {
         if (!item) {
-            return "Unknown item";
+            return ZotMetaL10n.t('unknown-item');
         }
-        var title = item.getField ? item.getField('title') : null;
-        if (title) {
-            return title;
+        try {
+            var title = item.getField?.('title');
+            if (title) return title;
+        } catch (error) {
+            // An unloaded item can still be identified by its numeric ID.
         }
-        return item.id ? "Item " + item.id : "Untitled item";
+        return item.id ? ZotMetaL10n.t('item-id', { id: ZotMetaL10n.number(item.id) }) : ZotMetaL10n.t('untitled-item');
+    },
+
+    itemCount(count) {
+        return ZotMetaL10n.t(count === 1 ? 'item-one' : 'item-other', { count: ZotMetaL10n.number(count) });
     },
 
     pluralize(count, singular, plural = null) {
@@ -639,48 +714,48 @@ Utilities = {
     },
 
     formatBatchProgress(doneCount, totalCount, successCount, failedCount, skippedCount) {
-        var message = doneCount + "/" + totalCount + " checked";
+        var message = ZotMetaL10n.t('checked', { done: ZotMetaL10n.number(doneCount), total: ZotMetaL10n.number(totalCount) });
         var details = [];
         if (successCount > 0) {
-            details.push(successCount + " updated");
+            details.push(ZotMetaL10n.t('updated-count', { count: ZotMetaL10n.number(successCount) }));
         }
         if (failedCount > 0) {
-            details.push(failedCount + " failed");
+            details.push(ZotMetaL10n.t('failed-count', { count: ZotMetaL10n.number(failedCount) }));
         }
         if (skippedCount > 0) {
-            details.push(skippedCount + " skipped");
+            details.push(ZotMetaL10n.t('skipped-count', { count: ZotMetaL10n.number(skippedCount) }));
         }
         if (details.length > 0) {
-            message += " - " + details.join(", ");
+            message = ZotMetaL10n.t('details', { message, details: details.join(ZotMetaL10n.t('list-separator')) });
         }
         return message;
     },
 
     formatBatchRow(batchName, doneCount, totalCount, successCount, failedCount, skippedCount) {
-        return batchName + ": " + this.formatBatchProgress(doneCount, totalCount, successCount, failedCount, skippedCount);
+        return ZotMetaL10n.t('batch-row', { batch: batchName, message: this.formatBatchProgress(doneCount, totalCount, successCount, failedCount, skippedCount) });
     },
 
     formatBatchSummary(successCount, failedCount, skippedCount, failedItems) {
         var parts = [];
         if (successCount > 0) {
-            parts.push(this.pluralize(successCount, "item") + " updated");
+            parts.push(ZotMetaL10n.t('updated-items', { items: this.itemCount(successCount) }));
         }
         if (failedCount > 0) {
-            parts.push(this.pluralize(failedCount, "item") + " failed");
+            parts.push(ZotMetaL10n.t('failed-items', { items: this.itemCount(failedCount) }));
         }
         if (skippedCount > 0) {
-            parts.push(this.pluralize(skippedCount, "item") + " skipped");
+            parts.push(ZotMetaL10n.t('skipped-items', { items: this.itemCount(skippedCount) }));
         }
-        var summary = parts.length > 0 ? parts.join(", ") + "." : "No supported items found.";
+        var summary = parts.length > 0 ? parts.join(ZotMetaL10n.t('list-separator')) + ZotMetaL10n.t('sentence-end') : ZotMetaL10n.t('no-supported-items');
 
         if (failedItems.length > 0) {
             var shownItems = failedItems.slice(0, 3).map(item => this.truncateText(item, 60));
-            summary += " Failed: " + shownItems.join("; ");
+            summary += ZotMetaL10n.t('failed-titles', { titles: shownItems.join("; ") });
             if (failedItems.length > shownItems.length) {
-                summary += "; +" + (failedItems.length - shownItems.length) + " more";
+                summary += ZotMetaL10n.t('more-failed', { count: ZotMetaL10n.number(failedItems.length - shownItems.length) });
             }
-            if (!/[.!?]$/.test(summary)) {
-                summary += ".";
+            if (!/[.!?。！？]$/.test(summary)) {
+                summary += ZotMetaL10n.t('sentence-end');
             }
         }
 
@@ -689,15 +764,15 @@ Utilities = {
 
     getBatchSummaryTitle(successCount, failedCount, skippedCount) {
         if (failedCount > 0 && successCount > 0) {
-            return "Metadata updated with issues";
+            return ZotMetaL10n.t('updated-with-issues');
         }
         if (failedCount > 0) {
-            return "Metadata update failed";
+            return ZotMetaL10n.t('update-failed');
         }
         if (successCount > 0) {
-            return skippedCount > 0 ? "Metadata updated with skips" : "Metadata updated";
+            return ZotMetaL10n.t(skippedCount > 0 ? 'updated-with-skips' : 'updated');
         }
-        return "No metadata updated";
+        return ZotMetaL10n.t('none-updated');
     },
 
     isEmpty(value) {

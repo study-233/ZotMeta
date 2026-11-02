@@ -60,7 +60,23 @@ function loadScripts(files) {
         setTimeout,
         clearTimeout,
         Headers,
+        URL,
         Services: {
+            strings: {
+                createBundle(uri) {
+                    const file = uri.replace('test://zotmeta/', 'src/');
+                    const entries = Object.fromEntries(fs.readFileSync(path.join(repoRoot, file), 'utf8')
+                        .split(/\r?\n/).filter(line => line && !line.startsWith('#')).map(line => {
+                            const split = line.indexOf('=');
+                            return [line.slice(0, split).trim(), line.slice(split + 1).trim()
+                                .replace(/\\u([0-9a-f]{4})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)))];
+                        }));
+                    return { GetStringFromName(key) {
+                        if (!(key in entries)) throw new Error('Missing string: ' + key);
+                        return entries[key];
+                    } };
+                }
+            },
             prefs: {
                 values: {},
                 getIntPref(name, fallback) {
@@ -131,6 +147,8 @@ function loadScripts(files) {
         __progressWindows: progressWindows
     });
 
+    vm.runInContext(fs.readFileSync(path.join(repoRoot, 'src/chrome/content/l10n.js'), 'utf8'), context);
+    context.ZotMetaL10n.init('test://zotmeta/');
     for (const file of files) {
         const code = fs.readFileSync(path.join(repoRoot, file), 'utf8');
         vm.runInContext(code, context, { filename: file });
@@ -154,6 +172,9 @@ function makeItem(fields, itemTypeID = 'preprint') {
             return this.fields[field] || '';
         },
         setField(field, value) {
+            if (this.itemTypeID === 'preprint' && field === 'publicationTitle') {
+                throw new Error("'publicationTitle' is not a valid field for type 'preprint'");
+            }
             this.fields[field] = value;
         },
         setCreators(creators) {
@@ -209,6 +230,9 @@ function createFakeWindow() {
             this.children = [];
             this.parentNode = null;
             this.style = {};
+            this.style.setProperty = (key, value) => { this.style[key] = value; };
+            this.dataset = {};
+            this.clientWidth = 520;
             this.attributes = {};
             this.textContent = '';
             this.className = '';
@@ -239,6 +263,14 @@ function createFakeWindow() {
 
         setAttribute(name, value) {
             this.attributes[name] = value;
+        }
+
+        getAttribute(name) {
+            return this.attributes[name] || null;
+        }
+
+        removeAttribute(name) {
+            delete this.attributes[name];
         }
 
         addEventListener(name, listener) {
@@ -620,7 +652,7 @@ function testControlPanel(context) {
     assert.equal(stats.attachments, 1);
     assert.equal(stats.failed, 1);
     assert.equal(stats.skipped, 1);
-    assert.deepEqual(plain(stats.typeDistribution.map(type => type.label)), ['journalArticle', 'book']);
+    assert.deepEqual(plain(stats.typeDistribution.map(type => type.label)), ['Journal Article', 'Book']);
 
     const fakeWindow = createFakeWindow();
     ZotMeta.id = 'zotmeta@roadtodream.tech';
@@ -900,12 +932,14 @@ async function testArxivDOIFallback(context) {
         author: [{ given: 'Stanley H.', family: 'Chan' }],
         issued: { 'date-parts': [[2024]] }, abstract: 'A tutorial on diffusion models.', version: '3'
     };
+    let journalRef = 'Example Journal, 7 (2024), 1–9';
     function atomDocument(id) {
         const entry = xmlNode('entry', [
             xmlNode('id', 'http://arxiv.org/abs/' + id),
             xmlNode('title', 'Title from arXiv'),
             xmlNode('published', '2024-03-26T21:01:41Z'),
             xmlNode('summary', 'Abstract from arXiv'),
+            xmlNode('arxiv:journal_ref', journalRef),
             xmlNode('author', xmlNode('name', 'Stanley H. Chan'))
         ]);
         entry.getElementsByTagNameNS = () => [];
@@ -928,7 +962,8 @@ async function testArxivDOIFallback(context) {
                 if (atomThrows) {
                     throw new Error('arXiv timeout');
                 }
-                return { ok: atomStatus === 200, status: atomStatus, text: async () => atomBody };
+                return { ok: atomStatus === 200, status: atomStatus, headers: new Headers({ 'Retry-After': '0' }),
+                    text: async () => atomBody };
             }
             assert.equal(url, 'https://doi.org/10.48550/arXiv.2403.18103');
             assert.equal(options.headers.get('Accept'), 'application/vnd.citationstyles.csl+json');
@@ -969,6 +1004,16 @@ async function testArxivDOIFallback(context) {
         assert.equal(native.Title, 'Title from arXiv');
         assert.equal(native.PublishDate, '2024-03-26');
         assert.equal(calls.length, 1, 'An arXiv success should not fetch DOI metadata');
+
+        const referred = makeItem({ archiveID: 'arXiv:2403.18103', extra: 'My note\nPMID: 123' }, 'preprint');
+        for (const ref of [journalRef, journalRef, 'Corrected citation', '']) {
+            journalRef = ref;
+            assert.equal(await Arxiv.updateMetadata(referred), 0);
+            assert.equal(referred.fields.extra, 'My note\nPMID: 123\narXiv journal ref: ' + (ref || 'Corrected citation'));
+        }
+        assert.equal(referred.fields.title, 'Title from arXiv');
+        assert.equal(referred.fields.publicationTitle, undefined);
+        assert.equal(referred.saved, true);
 
         atomStatus = 429;
         const existing = makeItem({ archiveID: 'arXiv:2403.18103', DOI: '10.1234/published', date: '2024-03-26' }, 'preprint');
@@ -1140,16 +1185,195 @@ function testSubtitles(Journal, Utilities) {
 }
 
 async function testPreparationFailure(context) {
-    const { ZotMeta } = context;
+    const { ZotMeta, Zotero } = context;
     const originalPrepare = ZotMeta.prepareItemForMetadataUpdate;
     const originalRecord = ZotMeta.recordUpdateResult;
+    const originalDebug = Zotero.debug;
+    const logged = [];
+    const item = makeItem({ title: 'Preparation failure' }, 'journalArticle');
     const results = [];
+    Zotero.debug = line => logged.push(line);
     ZotMeta.prepareItemForMetadataUpdate = async () => { throw new Error('PDF cache failure'); };
     ZotMeta.recordUpdateResult = async (batch, item, status) => results.push(status);
-    await ZotMeta.processUpdateTask({ batch: {}, item: makeItem({}, 'journalArticle') });
+    await ZotMeta.processUpdateTask({ batch: {}, item });
     assert.deepEqual(results, [1]);
+    assert.deepEqual(readFailureLogs(logged), [
+        { itemID: item.id, title: 'Preparation failure', reason: 'Error: PDF cache failure' }
+    ]);
     ZotMeta.prepareItemForMetadataUpdate = originalPrepare;
     ZotMeta.recordUpdateResult = originalRecord;
+    Zotero.debug = originalDebug;
+}
+
+function readFailureLogs(lines) {
+    const prefix = 'ZotMeta: Failed to update item metadata: ';
+    return lines.filter(line => line.startsWith(prefix)).map(line => JSON.parse(line.slice(prefix.length)));
+}
+
+async function testRateLimitRetries(context) {
+    const { ZotMeta, Zotero, Journal, Utilities } = context;
+    const originalPubMedTime = context.PubMed.lastRequestTime;
+    const originalDate = vm.runInContext('Date', context);
+    const originalFetch = Utilities.fetchWithTimeout;
+    const originalDelay = Utilities.delay;
+    const originalDebug = Zotero.debug;
+    const log = [], waits = [], starts = [];
+    let now = Date.UTC(2026, 0, 1);
+    const item = makeItem({ DOI: '10.1111/example', title: 'Example' }, 'journalArticle');
+    const limited = header => ({ status: 429, headers: new Headers(header ? { 'Retry-After': header } : {}) });
+    const ok = value => ({ ok: true, text: async () => JSON.stringify(value) });
+    const batch = { id: 12 };
+    try {
+        context.Date = class extends Date { static now() { return now; } };
+        context.PubMed.lastRequestTime = 0;
+        Utilities.sourceCooldowns.clear();
+        Utilities.delay = async ms => { waits.push(ms); now += ms; };
+        Zotero.debug = line => log.push(line);
+        Utilities.fetchWithTimeout = async url => {
+            if (url.startsWith('https://doi.org/')) {
+                starts.push(now);
+                return starts.length === 1 ? limited('3') : ok({ title: 'Found after cooldown' });
+            }
+            return ok({ esearchresult: { count: '0', idlist: [] } });
+        };
+        assert.equal(await ZotMeta.updateItemWithRetry(Journal, item, item.fields.title, batch), 0);
+        assert.equal(starts[1] - starts[0], 3000);
+        assert.equal(item.fields.title, 'Found after cooldown');
+        assert.deepEqual(readFailureLogs(log), []);
+
+        let doiCalls = 0;
+        const fallbackCalls = [];
+        Utilities.fetchWithTimeout = async url => {
+            if (url.startsWith('https://doi.org/')) {
+                doiCalls++;
+                return limited(new Date(now + 60000).toUTCString());
+            }
+            fallbackCalls.push(url);
+            return ok({ esearchresult: { count: '0', idlist: [] } });
+        };
+        waits.length = 0;
+        assert.equal(await ZotMeta.updateItemWithRetry(Journal, item, item.fields.title, batch), 1);
+        assert.equal(await ZotMeta.updateItemWithRetry(Journal, item, item.fields.title, batch), 1);
+        assert.equal(doiCalls, 1, 'Other workers honor the shared Retry-After date');
+        assert.equal(fallbackCalls.length, 2, 'A cooling DOI host must not block PubMed');
+        assert.ok(waits.every(ms => ms <= 350), 'Only normal PubMed pacing, no long retry timer');
+        for (const failure of readFailureLogs(log)) {
+            assert.equal(failure.batchID, 12);
+            assert.match(failure.reason, /HTTP 429.*retry later.*PubMed: search returned 0 matches/);
+        }
+        assert.equal(readFailureLogs(log).length, 2);
+
+        let finishEarlierRequest;
+        let raceCalls = 0;
+        Utilities.fetchWithTimeout = async () => {
+            if (++raceCalls === 1) return new Promise(resolve => { finishEarlierRequest = resolve; });
+            return limited('15');
+        };
+        const earlier = Utilities.requestMetadataText('race', 'https://race.example/a', {});
+        await Utilities.requestMetadataText('race', 'https://race.example/b', {});
+        finishEarlierRequest(ok({ title: 'Already in flight' }));
+        await earlier;
+        assert.equal(await Utilities.requestMetadataText('race', 'https://race.example/c', {}), null);
+        assert.equal(raceCalls, 2, 'An in-flight success must not cancel a newer cooldown');
+
+        let rawRequests = 0;
+        Utilities.fetchWithTimeout = async () => { rawRequests++; return limited(); };
+        for (const backoff of [2000, 4000, 8000, 16000, 30000, 30000]) {
+            const previous = rawRequests;
+            await Utilities.requestMetadataText('test', 'https://example.org/a', {});
+            now += backoff - 1;
+            await Utilities.requestMetadataText('test', 'https://example.org/b', {});
+            assert.equal(rawRequests, previous + 1, 'No early retry on the same host');
+            now++;
+        }
+        waits.length = 0;
+        const missing = makeItem({ title: 'No identifiers' }, 'journalArticle');
+        const callsBeforeMissing = rawRequests;
+        assert.equal(await ZotMeta.updateItemWithRetry(Journal, missing), 1);
+        assert.equal(rawRequests, callsBeforeMissing);
+        assert.deepEqual(waits, [], 'Missing identifiers do not trigger a retry');
+        assert.match(readFailureLogs(log).at(-1).reason, /missing DOI.*missing DOI, PMID and PMCID/);
+    } finally {
+        Utilities.sourceCooldowns.clear();
+        Utilities.fetchWithTimeout = originalFetch;
+        Utilities.delay = originalDelay;
+        Zotero.debug = originalDebug;
+        context.Date = originalDate;
+        context.PubMed.lastRequestTime = originalPubMedTime;
+    }
+    console.log('Rate-limit retries passed: seconds/date, bounded backoff, shared cooldown, fallback and missing IDs');
+}
+
+async function testFailureDiagnostics(context) {
+    const { ZotMeta, Zotero, Utilities, PubMed } = context;
+    const originalFetch = Utilities.fetchWithTimeout;
+    const originalDelay = Utilities.delay;
+    const originalDebug = Zotero.debug;
+    const originalItem = Zotero.Item;
+    const log = [];
+    const missing = makeItem({ title: 'Missing ISBN' }, 'book');
+    const journal = makeItem({ DOI: '10.1111/unmatched', title: 'A long title: ' + '文'.repeat(80) }, 'journalArticle');
+    const pinned = makeItem({ archiveID: 'arXiv:2403.18103v1', title: 'Versioned preprint' }, 'preprint');
+    const preprint = makeItem({ archiveID: 'arXiv:2403.18103', title: 'Unversioned preprint' }, 'preprint');
+    const write = makeItem({ ISBN: '123', title: 'Original "title"\nsecond line' }, 'book');
+    const retry = makeItem({ ISBN: '456', title: 'Recovered on retry' }, 'book');
+    const skipped = makeItem({ title: 'Unsupported' }, 'conferencePaper');
+    let retryRequests = 0;
+    write.saveTx = async () => { throw new Error('Database is read-only'); };
+    try {
+        Utilities.delay = async () => {};
+        Zotero.debug = line => log.push(line);
+        const ok = data => ({ ok: true, text: async () => JSON.stringify(data) });
+        Utilities.fetchWithTimeout = async url => {
+            if (url.includes('/isbn/456') && ++retryRequests === 1) return { ok: false, status: 503 };
+            if (url.startsWith('https://openlibrary.org/')) return ok({ title: 'Fetched book title' });
+            if (url.startsWith(PubMed.baseURL)) return ok({ esearchresult: { count: '0', idlist: [] } });
+            if (url.startsWith('https://export.arxiv.org/')) return { ok: false, status: 429 };
+            if (url.includes('10.48550/arXiv.2403.18103')) {
+                return ok({ DOI: '10.48550/arXiv.2403.18103', title: 'Another version', version: '3' });
+            }
+            assert.match(url, /10\.1111\/unmatched/);
+            return { ok: false, status: 404 };
+        };
+        ZotMeta.enqueueUpdateBatch([missing, journal, pinned, write, retry, skipped, preprint], createFakeWindow());
+        await waitForQueueToFinish(ZotMeta);
+        const failures = readFailureLogs(log);
+        assert.equal(failures.length, 4, 'Exactly one final failure per item, irrespective of retries or fallback');
+        const batchID = ZotMeta.updateBatchCounter;
+        assert.ok(failures.every(failure => failure.batchID === batchID));
+        assert.ok(log.includes('ZotMeta: Preprint saved: ' + JSON.stringify({ batchID, itemID: preprint.id })));
+        assert.ok(log.includes('ZotMeta: Batch completed: ' + JSON.stringify({
+            batchID, total: 7, updated: 2, failed: 4, skipped: 1
+        })));
+        const byID = new Map(failures.map(failure => [failure.itemID, failure]));
+        assert.match(byID.get(missing.id).reason, /missing ISBN/);
+        assert.equal(byID.get(journal.id).title, journal.fields.title);
+        assert.match(byID.get(journal.id).reason, /DOI: HTTP 404/);
+        assert.match(byID.get(journal.id).reason, /PubMed: search returned 0 matches/);
+        assert.match(byID.get(pinned.id).reason, /arXiv: HTTP 429/);
+        assert.match(byID.get(pinned.id).reason, /requested version v1/);
+        assert.equal(byID.get(write.id).title, 'Original "title"\nsecond line');
+        assert.match(byID.get(write.id).reason, /Database is read-only/);
+        assert.equal(retry.saved, true);
+        assert.equal(retryRequests, 2);
+        assert.deepEqual(skipped.tags, ['ZotMeta: Skipped']);
+        assert.ok(log.every(line => !line.includes('\n')), 'Each failure is one searchable debug entry');
+
+        log.length = 0;
+        Zotero.Item = function (type) { return makeItem({}, type); };
+        const attachment = makeAttachment({ title: 'Parent test.pdf', cacheText: 'DOI: 10.1111/unmatched' });
+        assert.equal(await ZotMeta.createParentItemForAttachment(attachment), 1);
+        const [parent] = readFailureLogs(log);
+        assert.equal(parent.itemID, attachment.parentID);
+        assert.equal(parent.title, 'Parent test.pdf');
+        assert.match(parent.reason, /HTTP 404/);
+    } finally {
+        Zotero.Item = originalItem;
+        Zotero.debug = originalDebug;
+        Utilities.fetchWithTimeout = originalFetch;
+        Utilities.delay = originalDelay;
+    }
+    console.log('Update diagnostics passed: concurrent failures, retry, skip, failed save and parent item');
 }
 
 function testSourceSettings(context) {
@@ -1187,6 +1411,130 @@ function testSourceSettings(context) {
     delete context.Services.prefs.values[context.Utilities.tagFailedItemsPref];
 }
 
+async function testInterfaceLocalization() {
+    const context = loadScripts(['src/chrome/content/utilities.js', 'src/chrome/content/zotmeta.js']);
+    context.document = { getElementById: () => null };
+    vm.runInContext(fs.readFileSync(path.join(repoRoot, 'src/preferences.js'), 'utf8'), context);
+    const { ZotMetaL10n: l10n, ZotMetaPreferences: prefs, Zotero, Utilities, ZotMeta } = context;
+    for (const [locale, chinese] of [['en-US', false], ['en-GB', false], ['zh-CN', true],
+        ['zh-Hans', true], ['fr-FR', false], ['zh-TW', false], ['zh-HK', false]]) {
+        Zotero.locale = locale;
+        assert.equal(l10n.locale, chinese ? 'zh-CN' : 'en-US');
+        assert.equal(l10n.t('update-metadata.label'), chinese ? '更新元数据' : 'Update Metadata');
+        assert.equal(l10n.itemType('journalArticle'), chinese ? '期刊文章' : 'Journal Article');
+        assert.equal(l10n.itemType('does-not-exist'), chinese ? '未知条目类型' : 'Unknown item type');
+        assert.equal(l10n.number(12345), new Intl.NumberFormat(l10n.formatLocale).format(12345));
+        assert.equal(l10n.date(new Date(2026, 2, 4)), new Intl.DateTimeFormat(l10n.formatLocale, {
+            year: 'numeric', month: 'long', day: 'numeric'
+        }).format(new Date(2026, 2, 4)));
+        assert.equal(Utilities.formatBatchProgress(4, 10, 2, 1, 1), chinese
+            ? '已检查 4/10 — 已更新 2 个，失败 1 个，跳过 1 个'
+            : '4/10 checked - 2 updated, 1 failed, 1 skipped');
+        const summary = Utilities.formatBatchSummary(2, 1, 1, ['Original Title — DOI 10.1234/ABC']);
+        assert.ok(summary.includes('Original Title — DOI 10.1234/ABC'), 'Bibliographic data must stay verbatim');
+        assert.equal(Utilities.getBatchSummaryTitle(1, 0, 0), chinese ? '元数据已更新' : 'Metadata updated');
+        assert.equal(Utilities.getBatchSummaryTitle(0, 1, 0), chinese ? '元数据更新失败' : 'Metadata update failed');
+        assert.equal(Utilities.getBatchSummaryTitle(0, 0, 2), chinese ? '未更新元数据' : 'No metadata updated');
+        const item = makeItem({ title: 'Original Title', DOI: '10.1234/ABC', dateAdded: '2024-02-29 12:00:00' }, 'journalArticle');
+        item.tags = ['ZotMeta: Failed', 'ZotMeta: Skipped'];
+        Zotero.Items.all = [item, makeAttachment({ title: 'Original PDF.pdf' })];
+        prefs.activitySelectedYear = 2024;
+        const stats = await prefs.getLibraryStats();
+        assert.equal(stats.totalItems, 1);
+        assert.equal(stats.attachments, 1);
+        assert.equal(stats.failed, 1);
+        assert.equal(stats.skipped, 1);
+        assert.equal(stats.typeDistribution[0].label, chinese ? '期刊文章' : 'Journal Article');
+        assert.equal(stats.activity.days.filter(day => day.inRange).length, 366);
+        assert.equal(stats.activity.days.find(day => day.key === '2024-02-29').count, 1);
+        assert.equal(stats.activity.total, 1);
+        assert.equal(item.getField('title'), 'Original Title');
+        assert.equal(item.getField('DOI'), '10.1234/ABC');
+        const untitled = makeAttachment();
+        untitled.attachmentFilename = '';
+        assert.equal(ZotMeta.getAttachmentTitle(untitled), 'Untitled attachment', 'Stored placeholder must remain stable');
+
+        const fake = createFakeWindow();
+        context.document = fake.document;
+        for (const id of ['zotmeta-pref-activity-grid', 'zotmeta-pref-activity-summary', 'zotmeta-pref-activity-year',
+            'zotmeta-pref-activity-previous', 'zotmeta-pref-activity-next', 'zotmeta-pref-activity-legend']) {
+            const element = fake.document.createElementNS('', 'div');
+            element.id = id;
+            fake.document.body.appendChild(element);
+        }
+        prefs.renderActivity(stats.activity);
+        const grid = fake.document.getElementById('zotmeta-pref-activity-grid');
+        const leapDay = grid.children.find(cell => cell.attributes.title === l10n.t('activity-tip', {
+            date: l10n.date(new Date(2024, 1, 29)), count: l10n.number(1)
+        }));
+        assert.ok(leapDay, 'Localized hover detail must retain the date and count');
+        const legend = fake.document.getElementById('zotmeta-pref-activity-legend');
+        assert.deepEqual(legend.children.slice(1, 6).map(cell => cell.className),
+            [0, 1, 2, 3, 4].map(level => 'zotmeta-pref-activity-cell level-' + level));
+        fake.document.getElementById('zotmeta-pref-activity-previous').listeners.click();
+        assert.equal(prefs.activitySelectedYear, 2023);
+        fake.document.getElementById('zotmeta-pref-activity-next').listeners.click();
+        assert.equal(prefs.activitySelectedYear, 2024);
+
+        // SQL statistics must use the same official labels as the item fallback.
+        Zotero.DB = {
+            valueQueryAsync: async () => 1,
+            queryAsync: async () => [{ label: 'journalArticle', count: 1 }]
+        };
+        assert.equal((await prefs.getItemStatsFromDB()).typeDistribution[0].label,
+            chinese ? '期刊文章' : 'Journal Article');
+        delete Zotero.DB;
+    }
+    for (let max = 0; max <= 20; max++) {
+        assert.equal(prefs.getActivityLevel(0, max), 0);
+        for (let count = 1; count <= max; count++) {
+            assert.ok(prefs.getActivityLevel(count, max) > 0);
+        }
+    }
+    const source = fs.readFileSync(path.join(repoRoot, 'src/preferences.xhtml'), 'utf8');
+    const ids = [...source.matchAll(/data-l10n-id="([^"]+)"/g)].map(match => match[1]);
+    const locales = ['en-US', 'zh-CN'].map(locale => fs.readFileSync(
+        path.join(repoRoot, 'src/locale', locale, 'zotmeta.ftl'), 'utf8'));
+    const keys = locales.map(text => [...text.matchAll(/^([\w-]+)\s*=/gm)].map(match => match[1]).sort());
+    assert.deepEqual(keys[0], keys[1], 'Fluent locales must have matching keys');
+    for (const id of ids) assert.ok(keys[0].includes(id), 'Missing XHTML Fluent string: ' + id);
+    const propertyKeys = ['en-US', 'zh-CN'].map(locale => fs.readFileSync(
+        path.join(repoRoot, 'src/chrome/locale', locale, 'zotmeta.properties'), 'utf8')
+        .split(/\r?\n/).filter(line => line && !line.startsWith('#')).map(line => line.split('=')[0].trim()).sort());
+    assert.deepEqual(propertyKeys[0], propertyKeys[1], 'Dynamic locales must have matching keys');
+    // Guard against returning to OS-dependent theme detection.
+    const theme = fs.readFileSync(path.join(repoRoot, 'src/theme.css'), 'utf8');
+    assert.ok(theme.includes('var(--color-background, Canvas)') && theme.includes('var(--fill-primary, CanvasText)'));
+    assert.ok(!theme.includes('prefers-color-scheme'), 'Actual Zotero theme variables must drive the palette');
+    console.log('Interface regression passed: en-US, en-GB, zh-CN, zh-Hans, fr-FR, zh-TW, zh-HK; SQL/fallback stats, leap-year activity, navigation, UI-only translation, resource parity');
+}
+
+async function testPrivateBuildUpdates() {
+    const context = loadScripts([]);
+    vm.runInContext(fs.readFileSync(path.join(repoRoot, 'src/bootstrap.js'), 'utf8'), context);
+    // An ordinary build must not import AddonManager or change any update setting.
+    await context.configurePrivateBuildUpdates('zotmeta@roadtodream.tech');
+    const calls = [];
+    const addon = { applyBackgroundUpdates: 1 };
+    context.ChromeUtils = { importESModule(uri) {
+        assert.equal(uri, 'resource://gre/modules/AddonManager.sys.mjs');
+        return { AddonManager: {
+            AUTOUPDATE_DISABLE: 0,
+            async getAddonByID(id) {
+                calls.push(id);
+                return addon;
+            }
+        } };
+    } };
+    context.Services.prefs.values['extensions.zotmeta.privateBuild'] = true;
+    await context.configurePrivateBuildUpdates('zotmeta@roadtodream.tech');
+    assert.deepEqual(calls, ['zotmeta@roadtodream.tech']);
+    assert.equal(addon.applyBackgroundUpdates, 0);
+    assert.deepEqual(Object.keys(context.Services.prefs.values), ['extensions.zotmeta.privateBuild'],
+        'Private builds must not disable global add-on updates');
+    console.log('Private build update policy passed: only ZotMeta background updates disabled; ordinary builds unchanged');
+}
+
 async function main() {
     const context = loadScripts([
         'src/chrome/content/utilities.js',
@@ -1206,6 +1554,8 @@ async function main() {
     await testArxivDOIFallback(context);
     await testBookLookups(context);
     await testPreparationFailure(context);
+    await testRateLimitRetries(context);
+    await testFailureDiagnostics(context);
     testSourceSettings(context);
 
     assert.equal(Utilities.decodeHTMLEntities('A &amp; B &#x1f;'), 'A & B \u001f');
@@ -1272,6 +1622,8 @@ async function main() {
     await testIdentifierExtraction(context);
     await testCreateParentItem(context);
     testControlPanel(context);
+    await testInterfaceLocalization();
+    await testPrivateBuildUpdates();
 
     console.log('All tests passed');
 }
